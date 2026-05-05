@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["US", "EU", "JP", "IN"]
+DOMAINS = ["EU"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
@@ -226,12 +226,26 @@ def _make_extract_js(domain_code, country):
     const title       = titleEl?.querySelector('b')?.textContent?.trim() || titleEl?.textContent?.trim() || '';
     const body        = (document.getElementById('review-content-' + reviewId)?.innerText || '').trim().replace(/\\n/g,' ');
     const reviewLink  = card.querySelector('kat-link[href*="customer-reviews/' + reviewId + '"]')?.getAttribute('href') || '';
+    // Collect all meta label→value pairs from the review card detail rows.
+    // Prefer 'Child ASIN'; fall back to 'ASIN' only when no child entry exists.
+    // Also try extracting ASIN from the product link href (most reliable).
     let childAsin = '';
+    const _meta = {{}};
     card.querySelectorAll('.css-yyccc7').forEach(r => {{
       const label = r.querySelector('.css-1ggdaz4')?.textContent?.trim();
-      const val   = r.querySelectorAll('div')[1]?.textContent?.trim();
-      if (label === 'Child ASIN') childAsin = val;
+      const divs  = r.querySelectorAll('div');
+      const val   = [...divs].slice(1).map(d => d.textContent.trim()).filter(Boolean)[0] || '';
+      if (label) _meta[label] = val;
     }});
+    if (_meta['Child ASIN']) {{
+      childAsin = _meta['Child ASIN'];
+    }} else {{
+      // Try extracting from the product link kat-link href (contains /dp/ASIN or ?ASIN=)
+      const prodLink = card.querySelector('kat-link[href*="/dp/"], kat-link[href*="ASIN="]')?.getAttribute('href') || '';
+      const asinFromLink = prodLink.match(/\/dp\/([A-Z0-9]{{10}})/)?.[1]
+                        || new URLSearchParams(prodLink.split('?')[1] || '').get('ASIN') || '';
+      childAsin = asinFromLink || _meta['ASIN'] || '';
+    }}
     const pStarEl       = card.querySelector('.asinDetail kat-star-rating');
     const productRating = pStarEl?.getAttribute('value') || '';
     const ratingsCount  = pStarEl?.getAttribute('review') || '';
@@ -342,38 +356,50 @@ async def _switch_sc_marketplace(page, display_name, prof):
     """
     print(f"  Switching SC marketplace → {display_name} ...", end=" ", flush=True)
     try:
-        # Ensure the account-switcher header exists, then open it — done atomically
-        # in one JS call so there's no race between presence check and click.
-        # If not present, navigate to SC Europe home first then retry.
-        opened = await page.evaluate("""
-        () => {
-            const el = document.querySelector('.dropdown-account-switcher-header');
-            if (!el) return false;
-            el.click();
-            return true;
-        }
-        """)
-        if not opened:
+        # 1. If the account-switcher header isn't on this page, navigate to SC Europe home first.
+        has_header = await page.evaluate(
+            "() => !!document.querySelector('.dropdown-account-switcher-header')"
+        )
+        if not has_header:
             await page.goto("https://sellercentral-europe.amazon.com/", wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_selector('.dropdown-account-switcher-header', timeout=10000)
-            await page.evaluate("document.querySelector('.dropdown-account-switcher-header').click()")
-        await asyncio.sleep(0.8)
+            await page.wait_for_selector('.dropdown-account-switcher-header', timeout=15000)
 
-        # 2. Expand the "Spigen EU" account group to reveal country sub-items.
-        #    Don't rely on the header label (may show a non-EU account); always
-        #    target "Spigen EU" explicitly.
-        await page.evaluate("""
+        # 2. Click the header to open the dropdown, then wait for list items to render.
+        await page.click('.dropdown-account-switcher-header')
+        try:
+            await page.wait_for_selector('.dropdown-account-switcher-list-item', timeout=8000)
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
+        # 3. Expand "Spigen EU" to reveal country sub-items, then wait for indented items.
+        found_eu = await page.evaluate("""
         () => {
             const items = [...document.querySelectorAll(
                 '.dropdown-account-switcher-list-item:not(.dropdown-account-switcher-list-item-indented)'
             )];
             const eu = items.find(el => el.textContent.includes('Spigen EU'));
-            if (eu) eu.click();
+            if (eu) { eu.click(); return true; }
+            return false;
         }
         """)
-        await asyncio.sleep(0.5)
+        if not found_eu:
+            visible_accts = await page.evaluate("""
+            () => [...document.querySelectorAll(
+                '.dropdown-account-switcher-list-item:not(.dropdown-account-switcher-list-item-indented)'
+            )].map(el => el.textContent.trim())
+            """)
+            print(f"WARN: 'Spigen EU' account not found (visible accounts: {visible_accts}) — scraping with current marketplace")
+            await page.keyboard.press('Escape')
+            return ""
 
-        # 3. Click the target marketplace item (exact match, then partial fallback)
+        try:
+            await page.wait_for_selector('.dropdown-account-switcher-list-item-indented', timeout=8000)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+
+        # 4. Click the target marketplace item (exact match, then partial fallback)
         clicked = await page.evaluate(f"""
         () => {{
             const items = [...document.querySelectorAll('.dropdown-account-switcher-list-item-indented')];
@@ -385,7 +411,6 @@ async def _switch_sc_marketplace(page, display_name, prof):
         """)
 
         if not clicked:
-            # Log what's actually visible to help diagnose future mismatches
             visible = await page.evaluate("""
             () => [...document.querySelectorAll('.dropdown-account-switcher-list-item-indented')]
                   .map(el => el.title || el.textContent.trim())
