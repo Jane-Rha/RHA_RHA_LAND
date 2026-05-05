@@ -102,7 +102,8 @@ CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # When "EU" is in DOMAINS, these sub-countries are scraped in order.
-EU_COUNTRIES = ["UK", "DE", "FR", "IT", "ES"]
+EU_COUNTRIES = ["DE", "IT", "FR", "ES", "UK"]
+# DE is scraped first (alone); IT, FR, ES, UK then scrape simultaneously in parallel.
 
 _DOMAINS = {
     "US": {
@@ -391,15 +392,25 @@ async def _switch_sc_marketplace(page, display_name, prof):
             """)
             print(f"WARN: '{display_name}' not found (visible: {visible}) — scraping with current marketplace")
             await page.keyboard.press('Escape')
-            return
+            return ""
 
         # 4. Wait for /home navigation (SC reloads to home after marketplace switch)
         await page.wait_for_load_state("domcontentloaded")
         await asyncio.sleep(random.uniform(*prof["read_delay"]))
         print("done")
 
+        # 5. Capture mons_sel_* URL params so parallel tabs can lock to this
+        #    marketplace via URL even if a later tab changes the shared session cookie.
+        try:
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(page.url).query, keep_blank_values=True)
+            return "&".join(f"{k}={v[0]}" for k, v in qs.items() if k.startswith("mons_sel"))
+        except Exception:
+            return ""
+
     except Exception as e:
         print(f"WARN: marketplace switch failed ({e}) — scraping with current marketplace")
+    return ""
 
 
 async def _enrich_rows_with_images(all_rows, dc, page, prof):
@@ -532,7 +543,7 @@ async def _enrich_csv_with_images(csv_path, page, prof):
     return total
 
 
-async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, append=False, pages=None, skip_images=False):
+async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, append=False, pages=None, skip_images=False, mkp_params=""):
     """Scrape one domain end-to-end. Returns (total_rows, total_with_imgs).
 
     out_file    : override output path (used by EU group to share one CSV).
@@ -542,21 +553,30 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
     skip_images : defer image fetching to the caller (used by EU so images are
                   fetched for all countries in one pass after all scraping is done).
                   Ignored when FETCH_IMAGES = False.
+    mkp_params  : pre-captured mons_sel_* URL params from a prior marketplace switch.
+                  When provided, skips the internal dropdown switch and embeds these
+                  params in every page URL so the tab stays locked to the right
+                  marketplace even if a parallel tab changes the shared session cookie.
     """
     pages      = pages if pages is not None else PAGES
     dc         = _DOMAINS[domain]
     out_file   = out_file or _out_file(domain)
     extract_js = _make_extract_js(domain, dc["country"])
     params     = f"?pageSize={PAGE_SIZE}&stars={STAR_FILTER}"
+    if mkp_params:
+        params += f"&{mkp_params}"
 
     print(f"\n{'═'*60}")
     print(f"  Domain : {domain}  ({dc['sc_base']})")
     print(f"  Pages  : {pages}  |  Page size: {PAGE_SIZE}  |  Stars: {STAR_FILTER}  |  Output: {out_file}")
     print(f"{'═'*60}")
 
-    # Switch SC marketplace via UI dropdown if this domain has a display name
-    if "sc_display_name" in dc:
-        await _switch_sc_marketplace(page, dc["sc_display_name"], prof)
+    # Switch SC marketplace via UI dropdown if needed.
+    # Skipped when mkp_params is already provided by the caller (EU parallel flow).
+    if "sc_display_name" in dc and not mkp_params:
+        captured = await _switch_sc_marketplace(page, dc["sc_display_name"], prof)
+        if captured:
+            params += f"&{captured}"
 
     # ── Step 1: scrape pages — write header once, append after each page ──
     if APPEND_CSV or append:
@@ -755,16 +775,60 @@ async def main():
                 if domain == "EU":
                     eu_file = os.path.join(OUT_DIR, "EU_seller_central_reviews.csv")
                     eu_rows = 0
-                    # Phase 1 — scrape all EU countries first (images deferred)
-                    for i, sub in enumerate(EU_COUNTRIES):
-                        sub_pages = PAGES_OVERRIDE.get(sub, PAGES)
-                        n_rows, _ = await scrape_domain(
-                            sub, page, ctx, prof, asin_filter,
-                            out_file=eu_file, append=(i > 0), pages=sub_pages,
-                            skip_images=True
+
+                    # Phase 1 — Germany alone (always first per user preference)
+                    n_de, _ = await scrape_domain(
+                        "DE", page, ctx, prof, asin_filter,
+                        out_file=eu_file, append=False,
+                        pages=PAGES_OVERRIDE.get("DE", PAGES), skip_images=True
+                    )
+                    eu_rows += n_de
+
+                    # Phase 2 — IT, FR, ES, UK in parallel.
+                    # Each gets its own tab. Marketplace switches are done sequentially
+                    # first (to capture mons_sel URL params), then all 4 scrape at once.
+                    # Each writes to a temp CSV to avoid concurrent write conflicts;
+                    # temp files are merged into eu_file after all are done.
+                    eu_rest   = [s for s in EU_COUNTRIES if s != "DE"]
+                    rest_tabs = {}
+                    rest_mkp  = {}
+                    rest_tmp  = {}
+
+                    for sub in eu_rest:
+                        tab = await ctx.new_page()
+                        rest_tabs[sub] = tab
+                        rest_tmp[sub]  = os.path.join(OUT_DIR, f"_eu_{sub}_tmp.csv")
+                        await tab.goto(
+                            "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
+                            wait_until="domcontentloaded", timeout=30000
                         )
-                        eu_rows += n_rows
-                    # Phase 2 — fetch images for all EU rows in one pass
+                        rest_mkp[sub] = await _switch_sc_marketplace(
+                            tab, _DOMAINS[sub]["sc_display_name"], prof
+                        )
+
+                    async def _scrape_rest(sub):
+                        n, _ = await scrape_domain(
+                            sub, rest_tabs[sub], ctx, prof, asin_filter,
+                            out_file=rest_tmp[sub], append=False,
+                            pages=PAGES_OVERRIDE.get(sub, PAGES),
+                            skip_images=True, mkp_params=rest_mkp[sub]
+                        )
+                        return n
+
+                    rest_counts = await asyncio.gather(*[_scrape_rest(s) for s in eu_rest])
+                    eu_rows += sum(rest_counts)
+
+                    # Merge temp CSVs into eu_file (skip header row from each temp file)
+                    for sub in eu_rest:
+                        tmp = rest_tmp[sub]
+                        if os.path.exists(tmp):
+                            with open(tmp, encoding="utf-8-sig") as f:
+                                rows = list(csv.reader(f))[1:]
+                            if rows:
+                                _csv_append_rows(eu_file, rows)
+                            os.remove(tmp)
+
+                    # Phase 3 — fetch images for all EU rows in one pass
                     eu_imgs = 0
                     if FETCH_IMAGES:
                         print(f"\n{'═'*60}")
