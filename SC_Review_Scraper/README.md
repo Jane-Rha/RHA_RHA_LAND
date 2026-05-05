@@ -5,22 +5,21 @@ Scrapes reviews from Amazon Seller Central and enriches each review with custome
 ## How it works
 
 1. **Auto-launch Chrome** — Starts Chrome with a dedicated scraper profile (`~/.chrome-scraper-profile`) and remote debugging on port 9222. Sessions persist between runs — log in once, done.
-2. **Login tabs** — Opens one tab per SC endpoint (US, EU, JP, IN). Log in and complete any OTP, then press Enter.
-3. **Parallel scraping** — Each domain gets its own tab and scrapes simultaneously. EU sub-countries (UK → DE → FR → IT → ES) run sequentially on one shared tab.
-4. **Incremental CSV write** — Reviews are flushed to CSV after every page so no data is lost if the run is interrupted.
-5. **Deduplication** — Removes duplicate Review IDs across page boundaries before image fetching.
-6. **Image enrichment** — Navigates to the amazon domain and fetches each review's detail page using in-browser `fetch()` with session cookies to extract customer-attached image URLs.
+2. **Session check** — Navigates to each SC portal and checks if the session is still valid. Skips the login step entirely for portals that are already authenticated.
+3. **Login tabs** — Only for portals that need login: opens one tab per SC endpoint (US, EU, JP, IN). Complete login + OTP on all tabs, then press Enter (interactive) or wait for the countdown (background run).
+4. **Parallel scraping** — Each domain gets its own tab and scrapes simultaneously. EU sub-countries (UK → DE → FR → IT → ES) run sequentially on one shared tab, with images fetched in a single pass at the end.
+5. **Incremental CSV write** — Reviews are flushed to CSV after every page so no data is lost if the run is interrupted.
+6. **Deduplication** — Removes duplicate Review IDs across page boundaries before image fetching.
+7. **Image enrichment** — Navigates to the Amazon domain and fetches each review's detail page using in-browser `fetch()` with session cookies to extract customer-attached image URLs.
 
 ## Prerequisites
-
-### Install dependencies
 
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-> Chrome must be installed at `/Applications/Google Chrome.app` (default Mac path). Update `CHROME_PATH` in the config if yours is different.
+> Chrome must be installed at `/Applications/Google Chrome.app` (default Mac path). Update `CHROME_PATH` in the config if yours differs.
 
 ## Usage
 
@@ -28,7 +27,9 @@ playwright install chromium
 python3 scrape_sc_reviews.py
 ```
 
-On first run Chrome opens automatically → log in to all SC accounts → press Enter. Subsequent runs reuse saved sessions.
+Or use the `/sc-scraper` Claude Code skill — it asks for all options interactively, edits the config, and runs the script automatically.
+
+On first run Chrome opens automatically → log in to all SC accounts → press Enter. Subsequent runs reuse saved sessions and start scraping immediately.
 
 ---
 
@@ -36,128 +37,82 @@ On first run Chrome opens automatically → log in to all SC accounts → press 
 
 Edit the **USER CONFIG** section at the top of `scrape_sc_reviews.py`.
 
-### `DOMAIN`
+### `DOMAINS`
 
-Marketplace to scrape.
+Marketplaces to scrape in parallel.
 
 | Value | Marketplace | Output file | Notes |
 |-------|-------------|-------------|-------|
-| `"US"` | United States | `US_*.csv` | Verified |
-| `"EU"` | UK + DE + FR + IT + ES combined | `EU_*.csv` | Auto-expands; uses `marketplaceId` per country |
+| `"US"` | United States | `US_*.csv` | |
+| `"EU"` | UK + DE + FR + IT + ES combined | `EU_*.csv` | Auto-expands; sub-countries scrape sequentially on one tab |
 | `"UK"` | United Kingdom | `UK_*.csv` | Single-country run |
 | `"DE"` | Germany | `DE_*.csv` | Single-country run |
 | `"FR"` | France | `FR_*.csv` | Single-country run |
 | `"IT"` | Italy | `IT_*.csv` | Single-country run |
 | `"ES"` | Spain | `ES_*.csv` | Single-country run |
-| `"JP"` | Japan | `JP_*.csv` | Verified |
-| `"IN"` | India | `IN_*.csv` | Verified |
+| `"JP"` | Japan | `JP_*.csv` | |
+| `"IN"` | India | `IN_*.csv` | |
 
-> `"EU"` automatically scrapes UK → DE → FR → IT → ES in sequence, switching marketplaces via the `marketplaceId` URL parameter. All five countries are written into one `EU_seller_central_reviews.csv`. Use individual codes (`"UK"`, `"DE"`, etc.) only if you need a single-country file.
+Default (all markets): `DOMAINS = ["US", "EU", "JP", "IN"]`
 
-### `PAGES`
+### `PAGES` / `PAGES_OVERRIDE`
 
-Default page limit applied to every domain. Total reviews ≈ `PAGES × PAGE_SIZE`.
-
-```python
-PAGES = 30      # 1,500 reviews at PAGE_SIZE=50
-PAGES = 25      # 2,500 reviews at PAGE_SIZE=100
-```
-
-### `PAGES_OVERRIDE`
-
-Per-domain page limit. Domains not listed here fall back to `PAGES`. UK and DE are EU sub-countries — their entries apply automatically when scraping `"EU"`.
+`PAGES` is the default page limit per domain. `PAGES_OVERRIDE` lets you set different limits per domain.
 
 ```python
-PAGES_OVERRIDE = {}                          # no overrides (default)
-PAGES_OVERRIDE = {"US": 20, "UK": 20, "DE": 20}   # US/UK/DE get 20 pages, others use PAGES
+PAGES = 30                                    # 1,500 reviews at PAGE_SIZE=50
+PAGES_OVERRIDE = {}                           # no overrides (default)
+PAGES_OVERRIDE = {"US": 49, "JP": 10}        # US gets 49 pages, JP gets 10, others use PAGES
 ```
 
 ### `PAGE_SIZE`
 
-Number of reviews returned per page by Seller Central. Supported values: `25`, `50`, `100`.
+Reviews per page. Supported: `25`, `50`, `100`.
 
 ```python
 PAGE_SIZE = 50    # default — 50 reviews/page
-PAGE_SIZE = 100   # fewer page loads, larger DOM per page
-PAGE_SIZE = 25    # smaller batches
 ```
-
-Higher values collect the same total reviews in fewer navigations but parse a larger DOM per page. `50` is the recommended default for stability.
 
 ### `STAR_FILTER`
 
-Comma-separated star ratings to include.
+```python
+STAR_FILTER = "1,2,3,4,5"   # all reviews (default)
+STAR_FILTER = "1,2,3"        # critical reviews only
+```
+
+### `FETCH_IMAGES`
 
 ```python
-STAR_FILTER = "1,2,3"       # critical reviews only (default)
-STAR_FILTER = "1,2,3,4,5"   # all reviews
-STAR_FILTER = "1"            # 1-star only
-```
-
-### `OUT_DIR`
-
-Directory where CSVs are saved. Each domain writes to `<OUT_DIR>/<DOMAIN>_seller_central_reviews.csv`.
-
-```python
-OUT_DIR = os.path.expanduser("~/Desktop")           # default
-OUT_DIR = "/Users/me/Documents/reviews"             # custom path
-```
-
-### `ASIN_FILTER_FILE`
-
-Path to a plain-text file with one ASIN per line. Only reviews matching those ASINs will appear in the output CSV. `None` saves all reviews regardless of ASIN.
-
-```
-# target_asins.txt
-B0C9RT63VX
-B096J9ZSG1
-B0D52KPZ96
-```
-
-```python
-ASIN_FILTER_FILE = None                                    # all ASINs (default)
-ASIN_FILTER_FILE = "/Users/kevinkim/Desktop/target_asins.txt"
-```
-
-### `HEADERS_TO_INCLUDE`
-
-Columns to keep in the output. `None` includes all 14 columns (default).
-
-```python
-HEADERS_TO_INCLUDE = None   # all columns
-
-HEADERS_TO_INCLUDE = ['ASIN', 'Created 날짜', 'Reviewer', 'Review Ratings',
-                       'Review Title', '본문', 'Image URL']
-```
-
-Full column list: `ASIN` · `Created 날짜` · `사진 유무` · `Reviewer` · `Review Ratings` · `Review Title` · `본문` · `Product Rating` · `Ratings Count` · `Domain Code` · `국가` · `Review Link` · `Image URL` · `Review ID`
-
-### `HEADLESS` / `SCRAPER_PROFILE_DIR` / `CHROME_PATH`
-
-Controls whether the browser is visible and which Chrome profile is used.
-
-| Value | Behaviour | Use when |
-|-------|-----------|----------|
-| `False` (default) | Auto-launches Chrome with `SCRAPER_PROFILE_DIR`. Browser window is visible. SC sessions persist between runs — log in once, done. | Normal use |
-| `True` | Launches headless Chromium using `SCRAPER_PROFILE_DIR`. Chrome must be fully closed first. | Background / automated runs |
-
-`SCRAPER_PROFILE_DIR` is a dedicated Chrome profile at `~/.chrome-scraper-profile`. It is separate from your regular Chrome profile, so SC sessions are saved there without affecting your everyday browsing. On first run, log in to all SC accounts; subsequent runs reuse the saved sessions automatically.
-
-```python
-HEADLESS = False
-SCRAPER_PROFILE_DIR = os.path.expanduser("~/.chrome-scraper-profile")
-CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+FETCH_IMAGES = True    # fetch reviewer-attached image URLs (default)
+FETCH_IMAGES = False   # skip image fetching (faster)
 ```
 
 ### `DETECTION_AVOIDANCE`
-
-Controls timing and behavioral patterns to avoid Amazon bot detection.
 
 | Level | Nav delay | Batch delay | Jitter | Batch size | Scroll | Use when |
 |-------|-----------|-------------|--------|------------|--------|----------|
 | `"LOW"` | 0.5–1.5s | 0.5–1.5s | 0–150ms | 20–30 | No | Testing / one-off |
 | `"MEDIUM"` | 2.0–5.0s | 2.0–4.5s | 0–600ms | 15–22 | Yes | Daily scheduled runs |
 | `"HIGH"` | 4.0–10.0s | 5.0–12.0s | 0–1200ms | 8–15 | Yes | Large scrapes / high frequency |
+
+### `ASIN_FILTER_FILE`
+
+Path to a plain-text file with one ASIN per line. Only reviews matching those ASINs appear in the output. `None` saves all reviews.
+
+### `OUT_DIR`
+
+Directory where CSVs are saved. Default: `~/Desktop`.
+
+### `HEADERS_TO_INCLUDE`
+
+Columns to keep in the output. `None` includes all 14 columns.
+
+```python
+HEADERS_TO_INCLUDE = ['ASIN', 'Created 날짜', 'Reviewer', 'Review Ratings',
+                       'Review Title', '본문', 'Image URL']
+```
+
+Full column list: `ASIN` · `Created 날짜` · `사진 유무` · `Reviewer` · `Review Ratings` · `Review Title` · `본문` · `Product Rating` · `Ratings Count` · `Domain Code` · `국가` · `Review Link` · `Image URL` · `Review ID`
 
 ---
 
@@ -195,15 +150,15 @@ Add an entry to `_DOMAINS` in the script:
 },
 ```
 
-Then set `DOMAIN = "CA"` and run.
+Then add `"CA"` to `DOMAINS` and run.
 
 ---
 
 ## Anti-bot measures
 
-- Connects to an existing logged-in Chrome session (no bot browser fingerprint)
+- Connects to an existing logged-in Chrome session (persistent profile, no bot fingerprint)
 - Randomized delays between page navigations
-- Optional human-like scroll simulation before each extraction
+- Human-like scroll simulation before each extraction (MEDIUM / HIGH)
 - Random batch sizes for image fetching
 - Per-request stagger (jitter) within each batch
 - Realistic browser headers on all marketplace requests

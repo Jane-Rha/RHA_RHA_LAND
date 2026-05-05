@@ -14,8 +14,8 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["EU"]
-# List of domains to scrape sequentially. Each gets its own CSV file.
+DOMAINS = ["US", "EU", "JP", "IN"]
+# List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
 # "EU" automatically scrapes UK + DE + FR + IT + ES in sequence using each
