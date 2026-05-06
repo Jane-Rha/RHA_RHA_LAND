@@ -70,6 +70,11 @@ FETCH_IMAGES = True
 #         EU fetches images for all countries in one pass after UK→DE→FR→IT→ES.
 # False — skip image fetching entirely (faster runs, Image URL column stays empty).
 
+FETCH_IMAGES_ONLY = True
+# True  — skip all scraping; just re-run the image fetch on existing CSV files.
+#         Use this to recover after a browser crash that interrupted the image fetch.
+#         DOMAINS and OUT_DIR must match the original run so the right CSVs are found.
+
 LOGIN_WAIT_SECONDS = 120
 # Seconds to wait for manual login when running non-interactively (background / no TTY).
 # In interactive mode the script waits for Enter instead (no fixed timeout).
@@ -712,6 +717,8 @@ async def main():
             asin_filter = {line.strip() for line in af if line.strip()}
         print(f"ASIN filter loaded: {len(asin_filter)} ASINs from {ASIN_FILTER_FILE}")
 
+    if FETCH_IMAGES_ONLY:
+        print(f"Mode        : FETCH_IMAGES_ONLY — skipping scrape, re-fetching images on existing CSVs")
     print(f"Domains     : {DOMAINS}  (parallel)")
     print(f"Pages/domain: {PAGES}  |  Overrides: {PAGES_OVERRIDE or 'none'}  |  Page size: {PAGE_SIZE}  |  Stars: {STAR_FILTER}  |  Avoidance: {DETECTION_AVOIDANCE}")
     print(f"Headless    : {HEADLESS}")
@@ -817,33 +824,32 @@ async def main():
                     eu_file = os.path.join(OUT_DIR, "EU_seller_central_reviews.csv")
                     eu_rows = 0
 
-                    # Phase 1 — Germany alone (always first per user preference)
-                    n_de, _ = await scrape_domain(
-                        "DE", page, ctx, prof, asin_filter,
-                        out_file=eu_file, append=False,
-                        pages=PAGES_OVERRIDE.get("DE", PAGES), skip_images=True
-                    )
-                    eu_rows += n_de
-
-                    # Phase 2 — IT, FR, ES, UK in parallel.
-                    # Each gets its own tab. Marketplace switches are done sequentially
-                    # EU countries share a session cookie, so parallel scraping causes
-                    # session-state races (all tabs clobber each other's mons_sel_mkid).
-                    # Scrape IT/FR/ES/UK sequentially — switch then immediately scrape each.
-                    eu_rest = [s for s in EU_COUNTRIES if s != "DE"]
-
-                    for sub in eu_rest:
-                        tab = await ctx.new_page()
-                        mkp = await _switch_sc_marketplace(
-                            tab, _DOMAINS[sub]["sc_display_name"], prof
+                    if not FETCH_IMAGES_ONLY:
+                        # Phase 1 — Germany alone (always first per user preference)
+                        n_de, _ = await scrape_domain(
+                            "DE", page, ctx, prof, asin_filter,
+                            out_file=eu_file, append=False,
+                            pages=PAGES_OVERRIDE.get("DE", PAGES), skip_images=True
                         )
-                        await scrape_domain(
-                            sub, tab, ctx, prof, asin_filter,
-                            out_file=eu_file, append=True,
-                            pages=PAGES_OVERRIDE.get(sub, PAGES),
-                            skip_images=True, mkp_params=mkp
-                        )
-                        await tab.close()
+                        eu_rows += n_de
+
+                        # Phase 2 — IT, FR, ES, UK sequentially.
+                        # EU countries share a session cookie so parallel scraping causes
+                        # session-state races (tabs clobber each other's mons_sel_mkid).
+                        eu_rest = [s for s in EU_COUNTRIES if s != "DE"]
+
+                        for sub in eu_rest:
+                            tab = await ctx.new_page()
+                            mkp = await _switch_sc_marketplace(
+                                tab, _DOMAINS[sub]["sc_display_name"], prof
+                            )
+                            await scrape_domain(
+                                sub, tab, ctx, prof, asin_filter,
+                                out_file=eu_file, append=True,
+                                pages=PAGES_OVERRIDE.get(sub, PAGES),
+                                skip_images=True, mkp_params=mkp
+                            )
+                            await tab.close()
 
                     # Count actual EU rows from CSV (append mode returns cumulative totals)
                     if os.path.exists(eu_file):
@@ -859,6 +865,8 @@ async def main():
                         eu_imgs = await _enrich_csv_with_images(eu_file, page, prof)
                     return ("EU", eu_rows, eu_imgs, "OK")
                 else:
+                    if FETCH_IMAGES_ONLY:
+                        return (domain, 0, 0, "SKIP (FETCH_IMAGES_ONLY — non-EU domain)")
                     eff_pages = PAGES_OVERRIDE.get(domain, PAGES)
                     n_rows, n_imgs = await scrape_domain(
                         domain, page, ctx, prof, asin_filter, pages=eff_pages)
