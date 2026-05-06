@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["EU"]
+DOMAINS = ["US", "EU", "JP", "IN"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
@@ -128,6 +128,7 @@ _DOMAINS = {
         "amazon_home":     "https://www.amazon.co.uk/",
         "review_url":      "https://www.amazon.co.uk/gp/customer-reviews/",
         "country":         "UK",
+        "image_fetch":     False,  # no amazon.co.uk customer session in scraper profile
     },
     "DE": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
@@ -144,6 +145,7 @@ _DOMAINS = {
         "amazon_home":     "https://www.amazon.fr/",
         "review_url":      "https://www.amazon.fr/gp/customer-reviews/",
         "country":         "FR",
+        "image_fetch":     False,  # no amazon.fr customer session in scraper profile
     },
     "IT": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
@@ -152,6 +154,7 @@ _DOMAINS = {
         "amazon_home":     "https://www.amazon.it/",
         "review_url":      "https://www.amazon.it/gp/customer-reviews/",
         "country":         "IT",
+        "image_fetch":     False,  # no amazon.it customer session in scraper profile
     },
     "ES": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
@@ -160,6 +163,7 @@ _DOMAINS = {
         "amazon_home":     "https://www.amazon.es/",
         "review_url":      "https://www.amazon.es/gp/customer-reviews/",
         "country":         "ES",
+        "image_fetch":     False,  # no amazon.es customer session in scraper profile
     },
     "JP": {
         "sc_base":     "https://sellercentral.amazon.co.jp/brand-customer-reviews/",
@@ -544,6 +548,9 @@ async def _enrich_csv_with_images(csv_path, page, prof):
     for dc_code, row_indices in by_domain.items():
         if dc_code not in _DOMAINS:
             print(f"  SKIP [{dc_code}] — not in domain registry")
+            continue
+        if not _DOMAINS[dc_code].get("image_fetch", True):
+            print(f"  SKIP [{dc_code}] — no customer session for image fetch (amazon.{dc_code.lower()} not logged in)")
             continue
         dc       = _DOMAINS[dc_code]
         fetch_js = _make_batch_fetch_js(dc["review_url"])

@@ -1,16 +1,16 @@
 # Seller Central Review Scraper
 
-Scrapes reviews from Amazon Seller Central and enriches each review with customer-attached image URLs. All configured domains scrape **simultaneously** in parallel. Configurable per marketplace, star filter, detection avoidance level, and output columns.
+Scrapes reviews from Amazon Seller Central and enriches each review with customer-attached image URLs. Top-level domains (US, EU, JP, IN) scrape in parallel; within EU, sub-countries scrape sequentially on one shared tab. Configurable per marketplace, star filter, detection avoidance level, and output columns.
 
 ## How it works
 
 1. **Auto-launch Chrome** — Starts Chrome with a dedicated scraper profile (`~/.chrome-scraper-profile`) and remote debugging on port 9222. Sessions persist between runs — log in once, done.
 2. **Session check** — Navigates to each SC portal and checks if the session is still valid. Skips the login step entirely for portals that are already authenticated.
 3. **Login tabs** — Only for portals that need login: opens one tab per SC endpoint (US, EU, JP, IN). Complete login + OTP on all tabs, then press Enter (interactive) or wait for the countdown (background run).
-4. **Parallel scraping** — Each domain gets its own tab and scrapes simultaneously. EU sub-countries (UK → DE → FR → IT → ES) run sequentially on one shared tab, with images fetched in a single pass at the end.
+4. **Parallel scraping** — Top-level domains (US, EU, JP, IN) each get their own tab and scrape simultaneously. EU sub-countries (DE → IT → FR → ES → UK) run **sequentially** on one shared tab — all EU countries share the same SC Europe session cookie so parallel tabs would race each other. DE scrapes first on the initial tab; remaining countries each open a new tab, switch marketplace via the account-switcher dropdown, then scrape and close.
 5. **Incremental CSV write** — Reviews are flushed to CSV after every page so no data is lost if the run is interrupted.
 6. **Deduplication** — Removes duplicate Review IDs across page boundaries before image fetching.
-7. **Image enrichment** — Navigates to the Amazon domain and fetches each review's detail page using in-browser `fetch()` with session cookies to extract customer-attached image URLs.
+7. **Image enrichment** — Navigates to the Amazon domain and fetches each review's detail page using in-browser `fetch()` with session cookies to extract customer-attached image URLs. **EU limitation**: only DE reviews get image URLs because the scraper Chrome profile has a customer session on amazon.de only. IT, FR, ES, and UK are skipped for image fetch until customer sessions for those domains are added to the profile.
 
 ## Prerequisites
 
@@ -85,6 +85,15 @@ STAR_FILTER = "1,2,3"        # critical reviews only
 ```python
 FETCH_IMAGES = True    # fetch reviewer-attached image URLs (default)
 FETCH_IMAGES = False   # skip image fetching (faster)
+```
+
+### `FETCH_IMAGES_ONLY`
+
+Crash-recovery mode. Set to `True` to skip all scraping and re-run only the image fetch phase on already-saved CSVs.
+
+```python
+FETCH_IMAGES_ONLY = False   # normal run (default)
+FETCH_IMAGES_ONLY = True    # skip scraping, re-fetch images on existing CSVs
 ```
 
 ### `DETECTION_AVOIDANCE`
