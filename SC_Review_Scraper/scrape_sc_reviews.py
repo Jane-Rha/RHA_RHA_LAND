@@ -113,11 +113,13 @@ _DOMAINS = {
         "country":     "US",
     },
     # EU countries all share sellercentral-europe.amazon.com (one login session).
-    # sc_display_name tells _switch_sc_marketplace which country to select in the
-    # account-switcher dropdown before scraping each country's reviews.
+    # sc_display_name: account-switcher dropdown label for this country.
+    # sc_mkid: Amazon standard marketplace ID — used to construct mons_sel_* URL params
+    #          directly without relying on the dropdown UI for every country.
     "UK": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
         "sc_display_name": "United Kingdom",
+        "sc_mkid":         "A1F83G8C2ARO7P",
         "amazon_home":     "https://www.amazon.co.uk/",
         "review_url":      "https://www.amazon.co.uk/gp/customer-reviews/",
         "country":         "UK",
@@ -125,6 +127,7 @@ _DOMAINS = {
     "DE": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
         "sc_display_name": "Germany",
+        "sc_mkid":         "A1PA6795UKMFR9",
         "amazon_home":     "https://www.amazon.de/",
         "review_url":      "https://www.amazon.de/gp/customer-reviews/",
         "country":         "DE",
@@ -132,6 +135,7 @@ _DOMAINS = {
     "FR": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
         "sc_display_name": "France",
+        "sc_mkid":         "A13V1IB3VIYZZH",
         "amazon_home":     "https://www.amazon.fr/",
         "review_url":      "https://www.amazon.fr/gp/customer-reviews/",
         "country":         "FR",
@@ -139,6 +143,7 @@ _DOMAINS = {
     "IT": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
         "sc_display_name": "Italy",
+        "sc_mkid":         "APJ6JRA9NG5V4",
         "amazon_home":     "https://www.amazon.it/",
         "review_url":      "https://www.amazon.it/gp/customer-reviews/",
         "country":         "IT",
@@ -146,6 +151,7 @@ _DOMAINS = {
     "ES": {
         "sc_base":         "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
         "sc_display_name": "Spain",
+        "sc_mkid":         "A1RKKUPIHCS9HS",
         "amazon_home":     "https://www.amazon.es/",
         "review_url":      "https://www.amazon.es/gp/customer-reviews/",
         "country":         "ES",
@@ -242,15 +248,26 @@ def _make_extract_js(domain_code, country):
     }} else {{
       // Try extracting from the product link kat-link href (contains /dp/ASIN or ?ASIN=)
       const prodLink = card.querySelector('kat-link[href*="/dp/"], kat-link[href*="ASIN="]')?.getAttribute('href') || '';
-      const asinFromLink = prodLink.match(/\/dp\/([A-Z0-9]{{10}})/)?.[1]
+      const asinFromLink = prodLink.match(/\\/dp\\/([A-Z0-9]{{10}})/)?.[1]
                         || new URLSearchParams(prodLink.split('?')[1] || '').get('ASIN') || '';
       childAsin = asinFromLink || _meta['ASIN'] || '';
     }}
     const pStarEl       = card.querySelector('.asinDetail kat-star-rating');
     const productRating = pStarEl?.getAttribute('value') || '';
     const ratingsCount  = pStarEl?.getAttribute('review') || '';
+    // Derive actual domain/country from review link — more reliable than the
+    // scraper-assigned value when a marketplace switch silently falls back.
+    let domainCode = '{domain_code}';
+    let countryCode = '{country}';
+    if (reviewLink) {{
+      const m = reviewLink.match(/amazon\\.(com(?!\\.)|co\\.uk|co\\.jp|de|fr|it|es|in)/);
+      if (m) {{
+        const _map = {{'com':'US','co.uk':'UK','co.jp':'JP','de':'DE','fr':'FR','it':'IT','es':'ES','in':'IN'}};
+        if (_map[m[1]]) {{ domainCode = _map[m[1]]; countryCode = _map[m[1]]; }}
+      }}
+    }}
     rows.push([childAsin, createdDate, 'N', reviewer, rating, title, body,
-               productRating, ratingsCount, '{domain_code}', '{country}', reviewLink, '', reviewId]);
+               productRating, ratingsCount, domainCode, countryCode, reviewLink, '', reviewId]);
   }});
   return rows;
 }}
@@ -346,96 +363,95 @@ def _csv_rewrite(path, headers, rows):
 
 
 async def _switch_sc_marketplace(page, display_name, prof):
-    """Switch SC Europe to a specific marketplace via the account switcher dropdown.
+    """Switch SC Europe to a specific marketplace via the two-level account switcher.
 
-    SC Europe uses a Vue-based account+marketplace switcher. The flow is:
-      1. Click .dropdown-account-switcher-header  →  opens account list
-      2. Click the current account item (non-indented)  →  expands marketplace sub-list
-      3. Click the target country item (..-indented[title=display_name])  →  navigates to /home
-      4. Wait for /home to load (session is now set to the new marketplace)
+    Flow:
+      1. Navigate to /home (dropdown only renders account items here).
+      2. Click header to open the account list.
+      3. Click "Spigen EU" — this EXPANDS its country sub-list (no navigation).
+      4. Click the target country item (indented) — this DOES navigate.
+      5. Capture mons_sel_* URL params, then navigate to reviews with target mkid.
     """
     print(f"  Switching SC marketplace → {display_name} ...", end=" ", flush=True)
+    from urllib.parse import urlparse, parse_qs
+    target_dc = next((v for v in _DOMAINS.values()
+                      if v.get("sc_display_name") == display_name), None)
+    target_mkid = target_dc.get("sc_mkid", "") if target_dc else ""
     try:
-        # 1. If the account-switcher header isn't on this page, navigate to SC Europe home first.
-        has_header = await page.evaluate(
-            "() => !!document.querySelector('.dropdown-account-switcher-header')"
-        )
-        if not has_header:
-            await page.goto("https://sellercentral-europe.amazon.com/", wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_selector('.dropdown-account-switcher-header', timeout=15000)
-
-        # 2. Click the header to open the dropdown, then wait for list items to render.
-        await page.click('.dropdown-account-switcher-header')
-        try:
-            await page.wait_for_selector('.dropdown-account-switcher-list-item', timeout=8000)
-        except Exception:
-            pass
+        await page.goto("https://sellercentral-europe.amazon.com/home",
+                        wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_selector('.dropdown-account-switcher-header', timeout=15000)
         await asyncio.sleep(0.5)
 
-        # 3. Expand "Spigen EU" to reveal country sub-items, then wait for indented items.
-        found_eu = await page.evaluate("""
-        () => {
-            const items = [...document.querySelectorAll(
-                '.dropdown-account-switcher-list-item:not(.dropdown-account-switcher-list-item-indented)'
-            )];
-            const eu = items.find(el => el.textContent.includes('Spigen EU'));
-            if (eu) { eu.click(); return true; }
-            return false;
-        }
-        """)
-        if not found_eu:
-            visible_accts = await page.evaluate("""
-            () => [...document.querySelectorAll(
-                '.dropdown-account-switcher-list-item:not(.dropdown-account-switcher-list-item-indented)'
-            )].map(el => el.textContent.trim())
-            """)
-            print(f"WARN: 'Spigen EU' account not found (visible accounts: {visible_accts}) — scraping with current marketplace")
-            await page.keyboard.press('Escape')
-            return ""
-
+        # Run the full dropdown interaction in a single JS evaluate to avoid CDP
+        # round-trip delays that let the dropdown auto-close between steps.
+        # Sequence: click header → wait for Spigen EU → click Spigen EU →
+        # wait for country sub-list → click target country (triggers navigation).
+        # The evaluate will throw "context destroyed" when navigation fires — that's expected.
         try:
-            await page.wait_for_selector('.dropdown-account-switcher-list-item-indented', timeout=8000)
-        except Exception:
-            pass
+            async with page.expect_navigation(timeout=15000):
+                try:
+                    await page.evaluate(f"""
+                        async () => {{
+                            const header = document.querySelector('.dropdown-account-switcher-header');
+                            if (!header) throw new Error('no header');
+                            header.click();
+
+                            const waitFor = (selector, text, maxMs=5000) => new Promise((resolve, reject) => {{
+                                const start = Date.now();
+                                const iv = setInterval(() => {{
+                                    const el = [...document.querySelectorAll(selector)]
+                                        .find(e => e.textContent.trim() === text);
+                                    if (el) {{ clearInterval(iv); resolve(el); return; }}
+                                    if (Date.now() - start > maxMs) {{ clearInterval(iv); reject(new Error('timeout: ' + text)); }}
+                                }}, 80);
+                            }});
+
+                            const spigen = await waitFor('.dropdown-account-switcher-list-item-label', 'Spigen EU');
+                            spigen.click();
+
+                            const country = await waitFor('.dropdown-account-switcher-list-item-indented', '{display_name}');
+                            country.click();
+                        }}
+                    """)
+                except Exception:
+                    pass  # "Execution context destroyed" when navigation fires — expected
+        except Exception as e:
+            print(f"WARN: country navigation failed ({e}) — falling back to mkid-only")
+            return f"mons_sel_mkid={target_mkid}" if target_mkid else ""
         await asyncio.sleep(0.3)
 
-        # 4. Click the target marketplace item (exact match, then partial fallback)
-        clicked = await page.evaluate(f"""
-        () => {{
-            const items = [...document.querySelectorAll('.dropdown-account-switcher-list-item-indented')];
-            let item = items.find(el => (el.title || el.textContent.trim()) === '{display_name}');
-            if (!item) item = items.find(el => el.textContent.includes('{display_name}'));
-            if (item) {{ item.click(); return true; }}
-            return false;
-        }}
-        """)
+        # Capture mons_sel_* params from the landed URL.
+        # Use the exact mkid from the URL (includes amzn1.mp.o. prefix SC requires).
+        qs = parse_qs(urlparse(page.url).query, keep_blank_values=True)
+        dir_mcid  = qs.get("mons_sel_dir_mcid", [""])[0]
+        mkid_from_url = qs.get("mons_sel_mkid",     [""])[0]
 
-        if not clicked:
-            visible = await page.evaluate("""
-            () => [...document.querySelectorAll('.dropdown-account-switcher-list-item-indented')]
-                  .map(el => el.title || el.textContent.trim())
-            """)
-            print(f"WARN: '{display_name}' not found (visible: {visible}) — scraping with current marketplace")
-            await page.keyboard.press('Escape')
-            return ""
+        if dir_mcid and mkid_from_url:
+            mons_params = f"mons_sel_dir_mcid={dir_mcid}&mons_sel_mkid={mkid_from_url}"
+            await page.goto(
+                f"https://sellercentral-europe.amazon.com/brand-customer-reviews/?{mons_params}",
+                wait_until="domcontentloaded", timeout=30000,
+            )
+            await asyncio.sleep(random.uniform(*prof["read_delay"]))
+            print("done")
+            return mons_params
 
-        # 4. Wait for /home navigation (SC reloads to home after marketplace switch)
-        await page.wait_for_load_state("domcontentloaded")
-        await asyncio.sleep(random.uniform(*prof["read_delay"]))
-        print("done")
+        result_params = "&".join(f"{k}={v[0]}" for k, v in qs.items() if k.startswith("mons_sel"))
+        if result_params:
+            print(f"done (params: {result_params})")
+            return result_params
 
-        # 5. Capture mons_sel_* URL params so parallel tabs can lock to this
-        #    marketplace via URL even if a later tab changes the shared session cookie.
-        try:
-            from urllib.parse import urlparse, parse_qs
-            qs = parse_qs(urlparse(page.url).query, keep_blank_values=True)
-            return "&".join(f"{k}={v[0]}" for k, v in qs.items() if k.startswith("mons_sel"))
-        except Exception:
-            return ""
+        if target_mkid:
+            print("done (mkid-only fallback)")
+            return f"mons_sel_mkid={target_mkid}"
+
+        print("WARN: could not determine marketplace params")
+        return ""
 
     except Exception as e:
-        print(f"WARN: marketplace switch failed ({e}) — scraping with current marketplace")
-    return ""
+        print(f"WARN: marketplace switch failed ({e})")
+        return f"mons_sel_mkid={target_mkid}" if target_mkid else ""
 
 
 async def _enrich_rows_with_images(all_rows, dc, page, prof):
@@ -811,47 +827,28 @@ async def main():
 
                     # Phase 2 — IT, FR, ES, UK in parallel.
                     # Each gets its own tab. Marketplace switches are done sequentially
-                    # first (to capture mons_sel URL params), then all 4 scrape at once.
-                    # Each writes to a temp CSV to avoid concurrent write conflicts;
-                    # temp files are merged into eu_file after all are done.
-                    eu_rest   = [s for s in EU_COUNTRIES if s != "DE"]
-                    rest_tabs = {}
-                    rest_mkp  = {}
-                    rest_tmp  = {}
+                    # EU countries share a session cookie, so parallel scraping causes
+                    # session-state races (all tabs clobber each other's mons_sel_mkid).
+                    # Scrape IT/FR/ES/UK sequentially — switch then immediately scrape each.
+                    eu_rest = [s for s in EU_COUNTRIES if s != "DE"]
 
                     for sub in eu_rest:
                         tab = await ctx.new_page()
-                        rest_tabs[sub] = tab
-                        rest_tmp[sub]  = os.path.join(OUT_DIR, f"_eu_{sub}_tmp.csv")
-                        await tab.goto(
-                            "https://sellercentral-europe.amazon.com/brand-customer-reviews/",
-                            wait_until="domcontentloaded", timeout=30000
-                        )
-                        rest_mkp[sub] = await _switch_sc_marketplace(
+                        mkp = await _switch_sc_marketplace(
                             tab, _DOMAINS[sub]["sc_display_name"], prof
                         )
-
-                    async def _scrape_rest(sub):
-                        n, _ = await scrape_domain(
-                            sub, rest_tabs[sub], ctx, prof, asin_filter,
-                            out_file=rest_tmp[sub], append=False,
+                        await scrape_domain(
+                            sub, tab, ctx, prof, asin_filter,
+                            out_file=eu_file, append=True,
                             pages=PAGES_OVERRIDE.get(sub, PAGES),
-                            skip_images=True, mkp_params=rest_mkp[sub]
+                            skip_images=True, mkp_params=mkp
                         )
-                        return n
+                        await tab.close()
 
-                    rest_counts = await asyncio.gather(*[_scrape_rest(s) for s in eu_rest])
-                    eu_rows += sum(rest_counts)
-
-                    # Merge temp CSVs into eu_file (skip header row from each temp file)
-                    for sub in eu_rest:
-                        tmp = rest_tmp[sub]
-                        if os.path.exists(tmp):
-                            with open(tmp, encoding="utf-8-sig") as f:
-                                rows = list(csv.reader(f))[1:]
-                            if rows:
-                                _csv_append_rows(eu_file, rows)
-                            os.remove(tmp)
+                    # Count actual EU rows from CSV (append mode returns cumulative totals)
+                    if os.path.exists(eu_file):
+                        with open(eu_file, encoding='utf-8-sig') as _f:
+                            eu_rows = sum(1 for _ in _f) - 1  # subtract header
 
                     # Phase 3 — fetch images for all EU rows in one pass
                     eu_imgs = 0
