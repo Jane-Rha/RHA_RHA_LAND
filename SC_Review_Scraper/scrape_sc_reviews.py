@@ -21,7 +21,7 @@ DOMAINS = ["US", "EU", "JP", "IN"]
 # "EU" automatically scrapes UK + DE + FR + IT + ES in sequence using each
 # country's marketplaceId and writes all reviews into one EU_*.csv file.
 
-PAGES = 30
+PAGES = 20
 # Default max pages to scrape per domain.
 # Total reviews ≈ PAGES × PAGE_SIZE.
 # Override per-domain with PAGES_OVERRIDE below.
@@ -75,7 +75,7 @@ FETCH_IMAGES_ONLY = False
 #         Use this to recover after a browser crash that interrupted the image fetch.
 #         DOMAINS and OUT_DIR must match the original run so the right CSVs are found.
 
-LOGIN_WAIT_SECONDS = 120
+LOGIN_WAIT_SECONDS = 300
 # Seconds to wait for manual login when running non-interactively (background / no TTY).
 # In interactive mode the script waits for Enter instead (no fixed timeout).
 
@@ -782,7 +782,7 @@ async def main():
             else:
                 _login_endpoints.append((_d, _DOMAINS[_d]["sc_base"]))
 
-        print("Checking Seller Central sessions …")
+        print("Opening Seller Central tabs …")
         existing  = list(ctx.pages)
         needs_login = []
         for _label, _url in _login_endpoints:
@@ -794,27 +794,27 @@ async def main():
             except Exception:
                 _logged_in = False
 
+            # Always bring every tab to front so the user can verify the correct
+            # marketplace is selected — even valid sessions may be on the wrong one.
+            await _p.bring_to_front()
             if _logged_in:
-                print(f"  [{_label}] Session valid — skipping login")
+                print(f"  [{_label}] Session valid — verify correct marketplace")
             else:
-                await _p.bring_to_front()
                 needs_login.append(_label)
-                print(f"  [{_label}] Not logged in — tab opened")
+                print(f"  [{_label}] Not logged in — log in now")
 
-        if needs_login:
-            print(f"\n  Login required for: {needs_login}")
-            print("  → Complete login + OTP for all tabs, then press Enter to start scraping.")
-            if sys.stdin.isatty():
-                await asyncio.get_event_loop().run_in_executor(None, input)
-            else:
-                wait = LOGIN_WAIT_SECONDS
-                print(f"  (non-interactive: starting in {wait} s — log in now)")
-                for remaining in range(wait, 0, -1):
-                    print(f"\r  {remaining:3d}s remaining …", end="", flush=True)
-                    await asyncio.sleep(1)
-                print("\r  Starting scrape!                    ")
+        login_notice = f"Login required for: {needs_login}\n  " if needs_login else ""
+        print(f"\n  {login_notice}→ Log in if needed, then navigate each tab to the correct marketplace.")
+        print(f"  Press Enter when ready, or wait {LOGIN_WAIT_SECONDS} s for auto-start.")
+        if sys.stdin.isatty():
+            await asyncio.get_event_loop().run_in_executor(None, input)
         else:
-            print("  All sessions valid — starting scrape immediately.")
+            wait = LOGIN_WAIT_SECONDS
+            print(f"  (non-interactive: starting in {wait} s)")
+            for remaining in range(wait, 0, -1):
+                print(f"\r  {remaining:3d}s remaining …", end="", flush=True)
+                await asyncio.sleep(1)
+            print("\r  Starting scrape!                    ")
 
         # ── Create one dedicated scraping page per domain group ───────────────
         # Each group gets its own fresh visible tab; all share session cookies.
