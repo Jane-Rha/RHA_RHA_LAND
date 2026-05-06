@@ -70,7 +70,7 @@ FETCH_IMAGES = True
 #         EU fetches images for all countries in one pass after UK→DE→FR→IT→ES.
 # False — skip image fetching entirely (faster runs, Image URL column stays empty).
 
-FETCH_IMAGES_ONLY = True
+FETCH_IMAGES_ONLY = False
 # True  — skip all scraping; just re-run the image fetch on existing CSV files.
 #         Use this to recover after a browser crash that interrupted the image fetch.
 #         DOMAINS and OUT_DIR must match the original run so the right CSVs are found.
