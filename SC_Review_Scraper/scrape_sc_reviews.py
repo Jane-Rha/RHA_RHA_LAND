@@ -585,7 +585,9 @@ async def _enrich_csv_with_images(csv_path, page, prof):
             if done < len(review_ids):
                 await asyncio.sleep(random.uniform(*prof["batch_delay"]))
 
-    _csv_rewrite(csv_path, headers, rows)
+        # Flush after each country so a crash mid-run doesn't lose already-fetched images.
+        _csv_rewrite(csv_path, headers, rows)
+        print(f"    [{dc_code}] images saved to CSV")
     return total
 
 
