@@ -5,7 +5,7 @@ const UPLOAD_SHEET_ID = '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g';
 const UPLOAD_SHEET_NAME = '1-3점';
 
 // "Update 날짜" index
-const DATE_COL_INDEX_1BASED = 18;
+const DATE_COL_INDEX_1BASED = 15;
 
 
 /* ===== MONDAY BOARD ===== */
