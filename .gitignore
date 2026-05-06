@@ -9,3 +9,6 @@ Apify/apify-amazon-dp-scraper/
 
 # clasp project links — script IDs are environment-specific
 .clasp.json
+
+# IDE settings
+.idea/
