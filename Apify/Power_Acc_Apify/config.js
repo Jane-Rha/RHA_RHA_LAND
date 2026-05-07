@@ -11,7 +11,7 @@ const CONFIG = {
 };
 
 function getSpreadsheetId_() {
-  return SpreadsheetApp.getActive().getId();
+  return '1QC8Is6UvTnFXaOeXviKM_331i3Fo_CBIYx80VS696LI';
 }
 
 
