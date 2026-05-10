@@ -14,14 +14,14 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["US", "EU", "JP", "IN"]
+DOMAINS = ["EU"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
 # "EU" automatically scrapes UK + DE + FR + IT + ES in sequence using each
 # country's marketplaceId and writes all reviews into one EU_*.csv file.
 
-PAGES = 30
+PAGES = 50
 # Default max pages to scrape per domain.
 # Total reviews ≈ PAGES × PAGE_SIZE.
 # Override per-domain with PAGES_OVERRIDE below.
@@ -39,7 +39,7 @@ START_PAGE = 1
 # Page to start from. Set > 1 to resume a previously interrupted run.
 # When resuming, also set APPEND_CSV = True to avoid overwriting saved rows.
 
-APPEND_CSV = False
+APPEND_CSV = True
 # False — overwrites the CSV at the start (default, fresh run).
 # True  — appends to an existing CSV without rewriting the header.
 #          Use together with START_PAGE to resume an interrupted run.
@@ -112,7 +112,7 @@ CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # When "EU" is in DOMAINS, these sub-countries are scraped in order.
-EU_COUNTRIES = ["DE", "IT", "FR", "ES", "UK"]
+EU_COUNTRIES = ["IT"]
 # DE is scraped first (alone); IT, FR, ES, UK then scrape simultaneously in parallel.
 
 _DOMAINS = {
@@ -869,27 +869,32 @@ async def main():
                     eu_rows = 0
 
                     if not FETCH_IMAGES_ONLY:
-                        # Phase 1 — Germany alone (always first per user preference)
-                        n_de, _ = await scrape_domain(
-                            "DE", page, ctx, prof, asin_filter,
-                            out_file=eu_file, append=False,
-                            pages=PAGES_OVERRIDE.get("DE", PAGES), skip_images=True
-                        )
-                        eu_rows += n_de
+                        # Phase 1 — Germany (always first if included, clears or appends per APPEND_CSV)
+                        if "DE" in EU_COUNTRIES:
+                            n_de, _ = await scrape_domain(
+                                "DE", page, ctx, prof, asin_filter,
+                                out_file=eu_file, append=APPEND_CSV,
+                                pages=PAGES_OVERRIDE.get("DE", PAGES), skip_images=True
+                            )
+                            eu_rows += n_de
 
-                        # Phase 2 — IT, FR, ES, UK sequentially on the same tab.
+                        # Phase 2 — remaining EU countries sequentially on the same tab.
                         # Reusing the active tab keeps the SC Europe session alive between
                         # country switches. Opening a new tab per country was prone to
                         # session expiry mid-run when DE took 30-60 min to complete.
                         eu_rest = [s for s in EU_COUNTRIES if s != "DE"]
 
-                        for sub in eu_rest:
+                        de_was_written = "DE" in EU_COUNTRIES
+                        for i, sub in enumerate(eu_rest):
+                            # First country appends only if DE already wrote the CSV;
+                            # otherwise respect APPEND_CSV (fresh vs resume).
+                            first_append = True if de_was_written else (APPEND_CSV if i == 0 else True)
                             mkp = await _switch_sc_marketplace(
                                 page, _DOMAINS[sub]["sc_display_name"], prof
                             )
                             await scrape_domain(
                                 sub, page, ctx, prof, asin_filter,
-                                out_file=eu_file, append=True,
+                                out_file=eu_file, append=first_append,
                                 pages=PAGES_OVERRIDE.get(sub, PAGES),
                                 skip_images=True, mkp_params=mkp
                             )

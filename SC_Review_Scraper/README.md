@@ -55,6 +55,25 @@ Marketplaces to scrape in parallel.
 
 Default (all markets): `DOMAINS = ["US", "EU", "JP", "IN"]`
 
+### `EU_COUNTRIES`
+
+Controls which EU sub-countries are scraped when `"EU"` is in `DOMAINS`. Defaults to all five.
+
+```python
+EU_COUNTRIES = ["DE", "IT", "FR", "ES", "UK"]   # all (default)
+EU_COUNTRIES = ["IT"]                             # Italy-only re-run
+```
+
+DE is always scraped first (Phase 1) if it's in the list. The remaining countries follow sequentially on the same tab (Phase 2). Removing DE from the list skips Phase 1 entirely — useful for appending a missed country to an existing EU CSV.
+
+**Single-country re-run example** (append Italy to an existing EU CSV):
+```python
+DOMAINS       = ["EU"]
+EU_COUNTRIES  = ["IT"]
+APPEND_CSV    = True
+PAGES         = 50
+```
+
 ### `PAGES` / `PAGES_OVERRIDE`
 
 `PAGES` is the default page limit per domain. `PAGES_OVERRIDE` lets you set different limits per domain.
@@ -72,6 +91,21 @@ Reviews per page. Supported: `25`, `50`, `100`.
 ```python
 PAGE_SIZE = 50    # default — 50 reviews/page
 ```
+
+### `START_PAGE` / `APPEND_CSV`
+
+Resume an interrupted run without losing already-saved rows.
+
+```python
+START_PAGE = 1        # start from the beginning (default)
+APPEND_CSV = False    # overwrite CSV on start (default)
+
+# Resume example — pick up from page 20, keep existing rows:
+START_PAGE = 20
+APPEND_CSV = True
+```
+
+`APPEND_CSV = True` also controls EU Phase 1: when DE is in `EU_COUNTRIES`, setting `APPEND_CSV = True` appends DE rows to an existing EU CSV instead of rewriting it.
 
 ### `STAR_FILTER`
 
