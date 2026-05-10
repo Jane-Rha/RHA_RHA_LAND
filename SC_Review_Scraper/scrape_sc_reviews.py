@@ -21,7 +21,7 @@ DOMAINS = ["US", "EU", "JP", "IN"]
 # "EU" automatically scrapes UK + DE + FR + IT + ES in sequence using each
 # country's marketplaceId and writes all reviews into one EU_*.csv file.
 
-PAGES = 20
+PAGES = 30
 # Default max pages to scrape per domain.
 # Total reviews ≈ PAGES × PAGE_SIZE.
 # Override per-domain with PAGES_OVERRIDE below.
@@ -78,6 +78,11 @@ FETCH_IMAGES_ONLY = False
 LOGIN_WAIT_SECONDS = 300
 # Seconds to wait for manual login when running non-interactively (background / no TTY).
 # In interactive mode the script waits for Enter instead (no fixed timeout).
+
+MID_RUN_LOGIN_WAIT_SECONDS = 120
+# Seconds to wait when a login redirect is detected mid-scrape (session expired).
+# The script pauses, lets you complete OTP, then retries the same page.
+# In interactive mode it waits for Enter instead.
 
 DETECTION_AVOIDANCE = "MEDIUM"
 # LOW    — short delays, fastest runs, higher detection risk
@@ -389,6 +394,23 @@ async def _switch_sc_marketplace(page, display_name, prof):
     try:
         await page.goto("https://sellercentral-europe.amazon.com/home",
                         wait_until="domcontentloaded", timeout=30000)
+
+        # Guard: if session expired, wait for re-login then retry (up to 3 attempts).
+        for _attempt in range(3):
+            if not any(x in page.url for x in ["/ap/", "signin", "mfa"]):
+                break
+            print(f"\n  ⚠  SC Europe session expired before switching to {display_name}.")
+            print(f"  Complete login + OTP in Chrome — scraper will retry automatically.")
+            if sys.stdin.isatty():
+                input(f"  Press Enter after logging in... ")
+            else:
+                for _s in range(MID_RUN_LOGIN_WAIT_SECONDS, 0, -1):
+                    print(f"  {_s}s remaining …  ", end="\r", flush=True)
+                    await asyncio.sleep(1)
+                print()
+            await page.goto("https://sellercentral-europe.amazon.com/home",
+                            wait_until="domcontentloaded", timeout=30000)
+
         await page.wait_for_selector('.dropdown-account-switcher-header', timeout=15000)
         await asyncio.sleep(0.5)
 
@@ -658,6 +680,19 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
         except Exception as e:
             if "closed" in str(e).lower():
                 raise  # browser disconnected — abort this domain immediately
+            cur_url = page.url
+            if any(x in cur_url for x in ["/ap/", "signin", "mfa"]):
+                print(f"LOGIN REDIRECT detected — session expired on page {p}")
+                print(f"  ⚠  Complete login + OTP in Chrome now.")
+                if sys.stdin.isatty():
+                    input(f"  Press Enter after logging in to retry page {p}... ")
+                else:
+                    print(f"  Waiting {MID_RUN_LOGIN_WAIT_SECONDS}s for login, then retrying page {p}...")
+                    for remaining in range(MID_RUN_LOGIN_WAIT_SECONDS, 0, -1):
+                        print(f"  {remaining}s remaining …  ", end="\r", flush=True)
+                        await asyncio.sleep(1)
+                    print()
+                continue  # retry same page — do NOT increment p
             print(f"SKIP (timeout/error: {e})")
             p += 1
             continue
@@ -842,23 +877,22 @@ async def main():
                         )
                         eu_rows += n_de
 
-                        # Phase 2 — IT, FR, ES, UK sequentially.
-                        # EU countries share a session cookie so parallel scraping causes
-                        # session-state races (tabs clobber each other's mons_sel_mkid).
+                        # Phase 2 — IT, FR, ES, UK sequentially on the same tab.
+                        # Reusing the active tab keeps the SC Europe session alive between
+                        # country switches. Opening a new tab per country was prone to
+                        # session expiry mid-run when DE took 30-60 min to complete.
                         eu_rest = [s for s in EU_COUNTRIES if s != "DE"]
 
                         for sub in eu_rest:
-                            tab = await ctx.new_page()
                             mkp = await _switch_sc_marketplace(
-                                tab, _DOMAINS[sub]["sc_display_name"], prof
+                                page, _DOMAINS[sub]["sc_display_name"], prof
                             )
                             await scrape_domain(
-                                sub, tab, ctx, prof, asin_filter,
+                                sub, page, ctx, prof, asin_filter,
                                 out_file=eu_file, append=True,
                                 pages=PAGES_OVERRIDE.get(sub, PAGES),
                                 skip_images=True, mkp_params=mkp
                             )
-                            await tab.close()
 
                     # Count actual EU rows from CSV (append mode returns cumulative totals)
                     if os.path.exists(eu_file):

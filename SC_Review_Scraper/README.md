@@ -7,7 +7,7 @@ Scrapes reviews from Amazon Seller Central and enriches each review with custome
 1. **Auto-launch Chrome** — Starts Chrome with a dedicated scraper profile (`~/.chrome-scraper-profile`) and remote debugging on port 9222. Sessions persist between runs — log in once, done.
 2. **Session check** — Navigates to each SC portal and checks if the session is still valid. Skips the login step entirely for portals that are already authenticated.
 3. **Login tabs** — Only for portals that need login: opens one tab per SC endpoint (US, EU, JP, IN). Complete login + OTP on all tabs, then press Enter (interactive) or wait for the countdown (background run).
-4. **Parallel scraping** — Top-level domains (US, EU, JP, IN) each get their own tab and scrape simultaneously. EU sub-countries (DE → IT → FR → ES → UK) run **sequentially** on one shared tab — all EU countries share the same SC Europe session cookie so parallel tabs would race each other. DE scrapes first on the initial tab; remaining countries each open a new tab, switch marketplace via the account-switcher dropdown, then scrape and close.
+4. **Parallel scraping** — Top-level domains (US, EU, JP, IN) each get their own tab and scrape simultaneously. EU sub-countries (DE → IT → FR → ES → UK) run **sequentially** on one shared tab — all EU countries share the same SC Europe session cookie so parallel tabs would race each other. DE scrapes first; all remaining countries reuse the same tab, switching marketplace via the account-switcher dropdown before each country. Reusing one tab keeps the SC Europe session active throughout the entire EU run. If the session expires between countries anyway, the script detects the login redirect, pauses up to `MID_RUN_LOGIN_WAIT_SECONDS` (default 120 s) for you to complete OTP, then retries the marketplace switch and current page automatically — no data is lost.
 5. **Incremental CSV write** — Reviews are flushed to CSV after every page so no data is lost if the run is interrupted.
 6. **Deduplication** — Removes duplicate Review IDs across page boundaries before image fetching.
 7. **Image enrichment** — Navigates to the Amazon domain and fetches each review's detail page using in-browser `fetch()` with session cookies to extract customer-attached image URLs. **EU limitation**: only DE reviews get image URLs because the scraper Chrome profile has a customer session on amazon.de only. IT, FR, ES, and UK are skipped for image fetch until customer sessions for those domains are added to the profile.
@@ -95,6 +95,10 @@ Crash-recovery mode. Set to `True` to skip all scraping and re-run only the imag
 FETCH_IMAGES_ONLY = False   # normal run (default)
 FETCH_IMAGES_ONLY = True    # skip scraping, re-fetch images on existing CSVs
 ```
+
+### `MID_RUN_LOGIN_WAIT_SECONDS`
+
+Seconds to wait when a login redirect is detected mid-scrape (e.g. session expired between EU countries). The script pauses, prints a warning, and retries automatically after the timer — no pages are skipped. Default: `120`.
 
 ### `DETECTION_AVOIDANCE`
 
