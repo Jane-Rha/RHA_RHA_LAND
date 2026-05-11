@@ -14,14 +14,14 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["EU"]
+DOMAINS = ["US", "EU", "JP", "IN"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
 # "EU" automatically scrapes UK + DE + FR + IT + ES in sequence using each
 # country's marketplaceId and writes all reviews into one EU_*.csv file.
 
-PAGES = 50
+PAGES = 30
 # Default max pages to scrape per domain.
 # Total reviews ≈ PAGES × PAGE_SIZE.
 # Override per-domain with PAGES_OVERRIDE below.
@@ -39,7 +39,7 @@ START_PAGE = 1
 # Page to start from. Set > 1 to resume a previously interrupted run.
 # When resuming, also set APPEND_CSV = True to avoid overwriting saved rows.
 
-APPEND_CSV = True
+APPEND_CSV = False
 # False — overwrites the CSV at the start (default, fresh run).
 # True  — appends to an existing CSV without rewriting the header.
 #          Use together with START_PAGE to resume an interrupted run.
@@ -112,7 +112,7 @@ CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # When "EU" is in DOMAINS, these sub-countries are scraped in order.
-EU_COUNTRIES = ["IT"]
+EU_COUNTRIES = ["DE", "IT", "FR", "ES", "UK"]
 # DE is scraped first (alone); IT, FR, ES, UK then scrape simultaneously in parallel.
 
 _DOMAINS = {
@@ -670,7 +670,7 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
         _csv_write_header(out_file, ALL_HEADERS)
         all_rows = []
 
-    p = START_PAGE if not append else 1
+    p = START_PAGE
     while p <= pages:
         url = dc["sc_base"] + params + (f"&pageNumber={p}" if p > 1 else "")
         print(f"  Page {p}/{pages} …", end=" ", flush=True)
