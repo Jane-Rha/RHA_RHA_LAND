@@ -7,6 +7,7 @@ Edit the USER CONFIG section below, then run:
 
 import asyncio, csv, random, os, sys
 from collections import defaultdict
+from datetime import datetime
 sys.stdout.reconfigure(line_buffering=True)  # flush every print immediately when running in background
 from playwright.async_api import async_playwright
 
@@ -228,6 +229,16 @@ ALL_HEADERS = [
     'Domain Code', '국가', 'Review Link', 'Image URL', 'Review ID',
 ]
 IDX = {h: i for i, h in enumerate(ALL_HEADERS)}
+
+
+def _normalize_date(s):
+    """Normalize SC date strings to yyyy-mm-dd. Falls back to original on parse failure."""
+    for fmt in ("%B %d, %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(s.strip(), fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            pass
+    return s
 
 
 def _make_extract_js(domain_code, country):
@@ -698,6 +709,9 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
             continue
         await simulate_reading(page, prof)
         rows = await page.evaluate(extract_js)
+        di = IDX['Created 날짜']
+        for row in rows:
+            row[di] = _normalize_date(row[di])
         print(f"{len(rows)} reviews  →  flushed to CSV")
         all_rows.extend(rows)
         _csv_append_rows(out_file, rows)   # ← incremental write after every page
