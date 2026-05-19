@@ -354,3 +354,33 @@ function _getOrCreateProductSheet_() {
 
   return { sheet, name };
 }
+
+
+/**********************************************************
+ * TEST — paste dataset ID from Apify run, execute once,
+ * then read the Execution log to verify the fix.
+ **********************************************************/
+function testProductFetchFix() {
+  const DATASET_ID = 'PASTE_DATASET_ID_HERE'; // from Apify console run → Dataset tab
+  const token = _getToken();
+
+  const items = _fetchAllDatasetItems_filtered_(DATASET_ID, token);
+
+  Logger.log('Total rows fetched: ' + items.length);
+
+  const deRows      = items.filter(i => (i.url || '').includes('amazon.de'));
+  const emptyUrl    = items.filter(i => !i.url).length;
+  const emptyCount  = items.filter(i => !i.countReview).length;
+  const emptyRating = items.filter(i => !i.productRating).length;
+
+  Logger.log('Rows with amazon.de URL: '    + deRows.length);
+  Logger.log('Rows with empty url: '        + emptyUrl);
+  Logger.log('Rows with empty countReview: ' + emptyCount);
+  Logger.log('Rows with empty productRating: ' + emptyRating);
+
+  if (deRows.length > 0) {
+    Logger.log('Sample DE row: ' + JSON.stringify(deRows[0]));
+  } else {
+    Logger.log('NO amazon.de rows — check "[Product] Raw field names" above for correct field names');
+  }
+}
