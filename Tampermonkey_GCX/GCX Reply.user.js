@@ -366,6 +366,21 @@
     </div>`;
   }
 
+  // SalesChannel "Amazon.it" → "https://www.amazon.it/dp/{asin}"
+  function amazonUrl(asin, salesChannel) {
+    if (!asin || asin === '—') return null;
+    const domain = salesChannel ? salesChannel.toLowerCase() : 'amazon.com';
+    return `https://www.${domain}/dp/${asin}`;
+  }
+
+  function rowAsin(asin, salesChannel) {
+    const url = amazonUrl(asin, salesChannel);
+    const val = url
+      ? `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;font-weight:500;">${esc(asin)}</a>`
+      : `<span class="sp-val">${esc(asin) || '—'}</span>`;
+    return `<div class="sp-row"><span class="sp-label">Return ASIN</span>${url ? val : `<span class="sp-val">—</span>`}</div>`;
+  }
+
   // ── Render order data ───────────────────────────────────────────────────────
   function renderOrder(data, orderId) {
     const o  = data.order   || {};
@@ -393,7 +408,7 @@
     }).join('');
 
     return `
-      ${row('Return ASIN', asin)}
+      ${rowAsin(asin, o.SalesChannel)}
 
       <div class="sp-block">
         <div class="sp-block-title">
