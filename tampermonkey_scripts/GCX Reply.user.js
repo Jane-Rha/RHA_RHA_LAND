@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.3.0
-// @description  Amazon order data via GAS web app + Spigen product info from Google Sheet
+// @version      1.4.0
+// @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
 // @grant        GM_xmlhttpRequest
@@ -20,7 +20,36 @@
   const PANEL_ID   = 'sp-order-panel';
   const SHEET_COLS = ['SKU', '모델명', '브랜드', '제조사명', '기종명', '색상명', '대분류', '생산업체', '원산지정보'];
 
-  // ── Zendesk API: read order ID + ASIN from ticket custom fields ─────────────
+  // ── Zendesk custom field IDs ─────────────────────────────────────────────
+  const ZD = {
+    ORDER_ID:      360021934132,
+    ASIN:          360021934312,
+    SKU:           900008676703,
+    CUST_NAME:     360021999951,
+    ORDER_STATUS:  360021934152,
+    ORDER_TOTAL:   360021934172,
+    DELIVERY_LVL:  900003828503,
+    PURCHASE_DATE: 360019586172,
+    COUNTRY:       4513936822297,
+    FULFILLMENT:   900002781823,
+    POINT_OF_PUR:  20016270875033,
+    DEVICE:        360022185671,
+    PRODUCT_NAME:  360022185891,
+  };
+
+  const COUNTRY_MAP = {
+    US:'us', GB:'uk', DE:'de', FR:'fr', IT:'it', ES:'es', JP:'jp',
+    NL:'nl', SE:'se', IE:'ie', PL:'pl', TR:'tr', BE:'be', IN:'in',
+    SG:'sg', AU:'au', CA:'ca', MX:'mx', KR:'kr',
+  };
+
+  const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
+
+  // ── Module state ─────────────────────────────────────────────────────────
+  let lastOrderData   = null;
+  let lastProductData = null;
+
+  // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
     const m = location.pathname.match(/\/tickets\/(\d+)/);
     if (!m) return cb(null, null);
@@ -42,6 +71,166 @@
     });
   }
 
+  // ── Auto-fill helpers ────────────────────────────────────────────────────
+
+  function salesChannelToPOP(ch) {
+    if (!ch) return null;
+    const s = ch.toLowerCase();
+    if (s.includes('.co.uk'))  return 'amazon_united_kingdom';
+    if (s.includes('.co.jp'))  return 'amazon_japan';
+    if (s.includes('.com.sg')) return 'amazon_singapore';
+    if (s.includes('.in'))     return 'amazon_india';
+    if (s.includes('.de') || s.includes('.fr') || s.includes('.it') ||
+        s.includes('.es') || s.includes('.nl')) return 'amazon_eu';
+    return 'others';
+  }
+
+  // Normalize label text: strip ★ * ( ) . and trim, lowercase
+  function normLabel(s) {
+    return s.replace(/[^가-힣a-zA-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  // Fill a Zendesk React-controlled text/date input by label text
+  function fillZdInput(labelText, value) {
+    if (!value) return false;
+    const needle = normLabel(labelText);
+    for (const input of document.querySelectorAll(
+      '[data-test-id="ticket-fields-text-field"], [data-test-id="ticket-fields-date-field"]'
+    )) {
+      let node = input.parentElement;
+      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+        const lbl = node.querySelector('label');
+        if (lbl && normLabel(lbl.textContent).startsWith(needle)) {
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          setter.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Fetch Zendesk field options (for Device / Product Name matching)
+  function fetchZdFieldOpts(fieldId, cb) {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: `https://spigenhelp.zendesk.com/api/v2/ticket_fields/${fieldId}.json`,
+      onload(res) {
+        try { cb(JSON.parse(res.responseText).ticket_field?.custom_field_options || []); }
+        catch { cb([]); }
+      },
+      onerror() { cb([]); },
+    });
+  }
+
+  function matchOptVal(opts, label) {
+    if (!label) return null;
+    const needle = label.trim().toLowerCase();
+    return opts.find(o => o.name.trim().toLowerCase() === needle)?.value || null;
+  }
+
+  // ── Auto-fill status helpers ─────────────────────────────────────────────
+
+  function setFillStatus(panel, msg) {
+    const el = panel?.querySelector('#sp-fill-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = msg ? 'inline' : 'none';
+  }
+
+  function maybeShowAutoFill(panel) {
+    const bar = panel?.querySelector('#sp-autofill-bar');
+    if (bar && lastOrderData) bar.style.display = 'block';
+  }
+
+  // ── Auto-fill: PUT all fields to Zendesk API, fill text fields in DOM ────
+
+  function autoFillTicket(panel) {
+    const ticketId = location.pathname.match(/\/tickets\/(\d+)/)?.[1];
+    if (!ticketId || !lastOrderData) return;
+
+    const btn = panel.querySelector('#sp-autofill-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Filling…'; }
+    setFillStatus(panel, '');
+
+    const o  = lastOrderData.order   || {};
+    const ad = lastOrderData.address || {};
+    const b  = lastOrderData.buyer   || {};
+    const p  = lastProductData || {};
+
+    const orderId      = panel.querySelector('#sp-order-input')?.value.trim() || '';
+    const asin         = panel.querySelector('#sp-asin-input')?.value.trim()  || '';
+    const buyerName    = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '';
+    const orderTotal   = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '';
+    const purchaseDateIso = o.PurchaseDate ? o.PurchaseDate.slice(0, 10) : '';
+    const purchaseDateDom = purchaseDateIso
+      ? new Date(purchaseDateIso + 'T00:00:00Z').toLocaleDateString('en-US',
+          { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+      : '';
+
+    // 1. DOM fill visible text fields immediately
+    fillZdInput('Order ID',           orderId);
+    fillZdInput('ASIN',               asin);
+    fillZdInput('문의SKU',            p.SKU           || '');
+    fillZdInput('Customer Full Name', buyerName);
+    fillZdInput('Purchase Date',      purchaseDateDom);
+    fillZdInput('Order Status',       o.OrderStatus   || '');
+    fillZdInput('Order Total',        orderTotal);
+    fillZdInput('Delivery Level',     o.ShipmentServiceLevelCategory || '');
+
+    // 2. Build Zendesk API fields array
+    const af = [];
+    if (orderId)                             af.push({ id: ZD.ORDER_ID,      value: orderId });
+    if (asin)                                af.push({ id: ZD.ASIN,          value: asin });
+    if (p.SKU)                               af.push({ id: ZD.SKU,           value: p.SKU });
+    if (buyerName)                           af.push({ id: ZD.CUST_NAME,     value: buyerName });
+    if (o.OrderStatus)                       af.push({ id: ZD.ORDER_STATUS,  value: o.OrderStatus });
+    if (orderTotal)                          af.push({ id: ZD.ORDER_TOTAL,   value: orderTotal });
+    if (o.ShipmentServiceLevelCategory)      af.push({ id: ZD.DELIVERY_LVL, value: o.ShipmentServiceLevelCategory });
+    if (purchaseDateIso)                     af.push({ id: ZD.PURCHASE_DATE, value: purchaseDateIso });
+    if (COUNTRY_MAP[ad.CountryCode])         af.push({ id: ZD.COUNTRY,       value: COUNTRY_MAP[ad.CountryCode] });
+    if (FULFILLMENT_MAP[o.FulfillmentChannel]) af.push({ id: ZD.FULFILLMENT, value: FULFILLMENT_MAP[o.FulfillmentChannel] });
+    const pop = salesChannelToPOP(o.SalesChannel);
+    if (pop)                                 af.push({ id: ZD.POINT_OF_PUR,  value: pop });
+
+    // 3. Fetch Device + Product Name options async, then PUT
+    const deviceLabel  = p['기종명'] || '';
+    const productLabel = p['모델명']  || '';
+
+    let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0);
+    function tryPut() { if (--remain <= 0) putZdTicket(ticketId, af, btn, panel); }
+
+    if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = matchOptVal(opts, deviceLabel);  if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
+    if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = matchOptVal(opts, productLabel); if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
+    if (!remain)      putZdTicket(ticketId, af, btn, panel);
+  }
+
+  function putZdTicket(ticketId, af, btn, panel) {
+    if (!af.length) {
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-Fill'; }
+      setFillStatus(panel, 'Nothing to fill.');
+      return;
+    }
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    GM_xmlhttpRequest({
+      method:  'PUT',
+      url:     `https://spigenhelp.zendesk.com/api/v2/tickets/${ticketId}.json`,
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      data:    JSON.stringify({ ticket: { custom_fields: af } }),
+      onload(res) {
+        if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-Fill'; }
+        setFillStatus(panel, res.status === 200 ? `✓ ${af.length} fields saved` : `⚠️ API error ${res.status}`);
+      },
+      onerror() {
+        if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-Fill'; }
+        setFillStatus(panel, '⚠️ Network error');
+      },
+    });
+  }
+
+  // ── Product info renderer ────────────────────────────────────────────────
+
   function renderProductInfo(asin) {
     const el = document.getElementById('sp-product-result');
     if (!el) return;
@@ -58,6 +247,11 @@
           if (data.error) { el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ ${esc(data.error)}</div>`; return; }
           const info = data.product;
           if (!info) { el.innerHTML = `<div style="padding:4px 14px;color:#aaa;font-size:11px;">ASIN ${esc(asin)} not found in product sheet.</div>`; return; }
+
+          // Store for auto-fill
+          lastProductData = info;
+          maybeShowAutoFill(document.getElementById(PANEL_ID));
+
           el.innerHTML = `
             <div style="padding:0 14px 8px;">
               <div class="sp-block" style="margin-top:0;">
@@ -83,7 +277,7 @@
     });
   }
 
-  // ── Styles ─────────────────────────────────────────────────────────────────
+  // ── Styles ───────────────────────────────────────────────────────────────
   GM_addStyle(`
     #sp-order-panel {
       position: fixed;
@@ -176,6 +370,27 @@
     }
     #sp-product-btn:hover { background: #d99200; }
 
+    #sp-autofill-bar { margin-bottom: 8px; display: none; }
+    #sp-autofill-btn {
+      background: #27ae60;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 0;
+      cursor: pointer;
+      font-size: 12px;
+      width: 100%;
+    }
+    #sp-autofill-btn:hover:not(:disabled) { background: #219a52; }
+    #sp-autofill-btn:disabled { background: #a8d5b5; cursor: default; }
+    #sp-fill-status {
+      display: none;
+      font-size: 11px;
+      color: #27ae60;
+      margin-top: 4px;
+      text-align: center;
+    }
+
     #sp-detected-ids { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; }
     .sp-chip {
       background: #e8f4fc;
@@ -197,7 +412,6 @@
       font-size: 12px;
     }
 
-    /* ── Data rows ── */
     .sp-block { margin-top: 4px; }
     .sp-block-title {
       display: flex;
@@ -239,7 +453,6 @@
       margin-top: 2px;
     }
 
-    /* ── Toggle button (reopens panel after close) ── */
     #sp-toggle-btn {
       position: fixed;
       right: 16px;
@@ -258,7 +471,7 @@
     #sp-toggle-btn:hover { background: #4a8fba; }
   `);
 
-  // ── Panel HTML ──────────────────────────────────────────────────────────────
+  // ── Panel HTML ────────────────────────────────────────────────────────────
   function buildPanel() {
     const d = document.createElement('div');
     d.id = PANEL_ID;
@@ -281,6 +494,10 @@
           <button id="sp-product-btn">Product</button>
         </div>
         <div id="sp-detected-ids"></div>
+        <div id="sp-autofill-bar">
+          <button id="sp-autofill-btn">✨ Auto-Fill Fields</button>
+          <div id="sp-fill-status"></div>
+        </div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
         </div>
@@ -290,7 +507,7 @@
     return d;
   }
 
-  // ── Format helpers ──────────────────────────────────────────────────────────
+  // ── Format helpers ────────────────────────────────────────────────────────
   function esc(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -315,7 +532,6 @@
     </div>`;
   }
 
-  // SalesChannel "Amazon.it" → "https://www.amazon.it/dp/{asin}"
   function amazonUrl(asin, salesChannel) {
     if (!asin || asin === '—') return null;
     const domain = salesChannel ? salesChannel.toLowerCase() : 'amazon.com';
@@ -330,14 +546,13 @@
     return `<div class="sp-row"><span class="sp-label">Return ASIN</span>${url ? val : `<span class="sp-val">—</span>`}</div>`;
   }
 
-  // ── Render order data ───────────────────────────────────────────────────────
+  // ── Render order data ─────────────────────────────────────────────────────
   function renderOrder(data, orderId) {
     const o  = data.order   || {};
     const it = data.items   || [];
     const ad = data.address || {};
     const b  = data.buyer   || {};
 
-    // Items endpoint returns 403 — ASIN is detected separately and shown in Product Info section
     const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
     const asin = it[0]?.ASIN || pageAsins[0] || '—';
     const amount  = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '—';
@@ -396,7 +611,7 @@
     `;
   }
 
-  // ── Fetch via GM_xmlhttpRequest (bypasses CORS) ─────────────────────────────
+  // ── Fetch order via GAS ───────────────────────────────────────────────────
   function fetchOrder(orderId) {
     setStatus('⏳ Fetching order data…');
     GM_xmlhttpRequest({
@@ -410,6 +625,11 @@
         try {
           const data = JSON.parse(res.responseText);
           if (data.error) { setStatus('⚠️ ' + data.error); return; }
+
+          // Store for auto-fill
+          lastOrderData = data;
+          maybeShowAutoFill(document.getElementById(PANEL_ID));
+
           result.innerHTML = renderOrder(data, orderId);
           result.querySelectorAll('.sp-block-title').forEach(title => {
             title.addEventListener('click', e => {
@@ -418,7 +638,6 @@
             });
           });
 
-          // Auto-fill ASIN input if not already set
           const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
           const detectedAsin = data.items?.[0]?.ASIN || pageAsins[0];
           const asinInput = document.getElementById('sp-asin-input');
@@ -442,15 +661,13 @@
     if (result) result.innerHTML = `<div id="sp-status">${esc(msg)}</div>`;
   }
 
-  // ── Auto-detect Amazon order IDs from visible ticket text ───────────────────
+  // ── Auto-detect order IDs from visible ticket text ─────────────────────
   function detectOrderIds() {
-    // Exclude tab headers + hover tooltips — they contain other open tickets' data
     const excludedText = [...document.querySelectorAll(
       '[data-test-id="header-tab"], [data-test-id="tooltip-description"]'
     )].map(el => el.innerText || '').join('\n');
     const excludedIds = new Set([...excludedText.matchAll(/\d{3}-\d{7}-\d{7}/g)].map(m => m[0]));
 
-    // innerText misses <input>/<textarea> values — scan them too
     const inputText = [...document.querySelectorAll('input, textarea')].map(el => el.value || '').join('\n');
     const text = (document.body.innerText || '') + '\n' + inputText;
     return [...new Set([...text.matchAll(ORDER_RE)].map(m => m[1]))]
@@ -462,7 +679,6 @@
     const bar = panel.querySelector('#sp-detected-ids');
     if (!bar) return;
 
-    // Only update if IDs actually changed
     const current = [...bar.querySelectorAll('.sp-chip')].map(c => c.dataset.id).join(',');
     if (current === ids.join(',')) return;
 
@@ -480,7 +696,6 @@
       bar.appendChild(chip);
     });
 
-    // Auto-load only when API didn't already supply an order ID
     if (!skipAutoLoad) {
       if (ids.length === 1 && document.getElementById('sp-status')) {
         const input = panel.querySelector('#sp-order-input');
@@ -493,7 +708,7 @@
     }
   }
 
-  // ── Draggable panel ─────────────────────────────────────────────────────────
+  // ── Draggable panel ───────────────────────────────────────────────────────
   function makeDraggable(panel, handle) {
     let offX = 0, offY = 0;
     handle.addEventListener('mousedown', e => {
@@ -515,11 +730,10 @@
     });
   }
 
-  // ── Init ────────────────────────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────────
   function init() {
     if (document.getElementById(PANEL_ID)) return;
 
-    // Toggle button to reopen panel
     let toggleBtn = document.getElementById('sp-toggle-btn');
     if (!toggleBtn) {
       toggleBtn = document.createElement('button');
@@ -557,27 +771,33 @@
     };
     asinInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-product-btn').click(); });
 
-    // ── Reset panel when ticket changes ────────────────────────────────────────
+    panel.querySelector('#sp-autofill-btn').onclick = () => autoFillTicket(panel);
+
+    // ── Reset panel on ticket navigation ────────────────────────────────────
     function resetPanel() {
       orderInput.value = '';
       asinInput.value  = '';
+      lastOrderData    = null;
+      lastProductData  = null;
       const result = document.getElementById('sp-result');
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
       if (productResult) productResult.innerHTML = '';
       const chips = document.getElementById('sp-detected-ids');
       if (chips) chips.innerHTML = '';
+      const autoBar = panel.querySelector('#sp-autofill-bar');
+      if (autoBar) autoBar.style.display = 'none';
+      setFillStatus(panel, '');
     }
 
     function autoDetectAll() {
-      // Single API call for both order ID and ASIN — avoids picking up other tabs' data
       getTicketFields((orderId, asin) => {
         const orderInput = panel.querySelector('#sp-order-input');
         if (orderId && orderInput && !orderInput.value) {
           orderInput.value = orderId;
           fetchOrder(orderId);
         }
-        updateDetectedChips(panel, !!orderId); // skip page-scan auto-load if API found one
+        updateDetectedChips(panel, !!orderId);
 
         const detectedAsin = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
         if (detectedAsin) {
@@ -587,7 +807,6 @@
       });
     }
 
-    // Intercept Zendesk SPA navigation (pushState + popstate)
     let lastTicketId = location.pathname.match(/\/tickets\/(\d+)/)?.[1];
     let navTimer = null;
     function onNav() {
@@ -605,7 +824,6 @@
     history.replaceState = (...a) => { origReplace(...a); onNav(); };
     window.addEventListener('popstate', onNav);
 
-    // Debounced MutationObserver to re-scan ticket content as it loads
     let scanTimer = null;
     const observer = new MutationObserver(() => {
       clearTimeout(scanTimer);
@@ -613,11 +831,8 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Initial scan on first load
     setTimeout(autoDetectAll, 2500);
   }
 
-  // Run immediately (document-idle guarantees DOM is ready);
-  // short delay lets Zendesk's React finish its first render pass.
   setTimeout(init, 800);
 })();
