@@ -450,7 +450,9 @@
     )].map(el => el.innerText || '').join('\n');
     const excludedIds = new Set([...excludedText.matchAll(/\d{3}-\d{7}-\d{7}/g)].map(m => m[0]));
 
-    const text = document.body.innerText || '';
+    // innerText misses <input>/<textarea> values — scan them too
+    const inputText = [...document.querySelectorAll('input, textarea')].map(el => el.value || '').join('\n');
+    const text = (document.body.innerText || '') + '\n' + inputText;
     return [...new Set([...text.matchAll(ORDER_RE)].map(m => m[1]))]
       .filter(id => !excludedIds.has(id));
   }
