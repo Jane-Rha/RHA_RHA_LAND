@@ -14,9 +14,7 @@
 (function () {
   'use strict';
 
-  // Replace with your deployed GAS web app URL after deploying:
-  //   GAS → Deploy → New deployment → Web app → Execute as Me → Anyone
-  const GAS_URL    = 'YOUR_GAS_WEB_APP_URL';
+  const GAS_URL    = 'https://script.google.com/macros/s/AKfycbw2Vdwk197LXB6oUAzuHS8sKamD5uqKZJDLvcHzbftWJk-M65XV1fAnTqiZo7ZEm4hk/exec';
   const ORDER_RE   = /\b(\d{3}-\d{7}-\d{7})\b/g;
   const ASIN_RE    = /\b(B[A-Z0-9]{9})\b/g;
   const PANEL_ID   = 'sp-order-panel';
