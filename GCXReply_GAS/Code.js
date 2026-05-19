@@ -90,8 +90,9 @@ function sha256Hex_(msg) {
 }
 
 function hmac_(key, msg) {
-  // key: string on first call, byte[] on subsequent calls
-  return Utilities.computeHmacSha256Signature(msg, key);
+  const msgBytes = Utilities.newBlob(msg).getBytes();
+  const keyBytes = typeof key === 'string' ? Utilities.newBlob(key).getBytes() : key;
+  return Utilities.computeHmacSha256Signature(msgBytes, keyBytes);
 }
 
 function hmacHex_(key, msg) {
