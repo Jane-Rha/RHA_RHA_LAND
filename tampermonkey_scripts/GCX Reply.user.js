@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.2.0
+// @version      1.3.0
 // @description  Amazon order data via GAS web app + Spigen product info from Google Sheet
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -20,22 +20,25 @@
   const PANEL_ID   = 'sp-order-panel';
   const SHEET_COLS = ['SKU', '모델명', '브랜드', '제조사명', '기종명', '색상명', '대분류', '생산업체', '원산지정보'];
 
-  // ── Zendesk API: read ASIN from ticket custom fields ────────────────────────
-  function getTicketASIN(cb) {
+  // ── Zendesk API: read order ID + ASIN from ticket custom fields ─────────────
+  function getTicketFields(cb) {
     const m = location.pathname.match(/\/tickets\/(\d+)/);
-    if (!m) return cb(null);
+    if (!m) return cb(null, null);
     GM_xmlhttpRequest({
       method: 'GET',
       url: `https://spigenhelp.zendesk.com/api/v2/tickets/${m[1]}.json`,
       onload(res) {
-        if (res.status !== 200) return cb(null);
+        if (res.status !== 200) return cb(null, null);
         try {
-          const fields = JSON.parse(res.responseText).ticket?.custom_fields || [];
-          const asinField = fields.find(f => /^B[A-Z0-9]{9}$/.test(String(f.value || '')));
-          cb(asinField?.value || null);
-        } catch { cb(null); }
+          const ticket = JSON.parse(res.responseText).ticket || {};
+          const fields = ticket.custom_fields || [];
+          const vals   = fields.map(f => String(f.value || ''));
+          const orderId = vals.find(v => /^\d{3}-\d{7}-\d{7}$/.test(v)) || null;
+          const asin    = vals.find(v => /^B[A-Z0-9]{9}$/.test(v)) || null;
+          cb(orderId, asin);
+        } catch { cb(null, null); }
       },
-      onerror() { cb(null); },
+      onerror() { cb(null, null); },
     });
   }
 
@@ -441,11 +444,18 @@
 
   // ── Auto-detect Amazon order IDs from visible ticket text ───────────────────
   function detectOrderIds() {
+    // Exclude tab headers + hover tooltips — they contain other open tickets' data
+    const excludedText = [...document.querySelectorAll(
+      '[data-test-id="header-tab"], [data-test-id="tooltip-description"]'
+    )].map(el => el.innerText || '').join('\n');
+    const excludedIds = new Set([...excludedText.matchAll(/\d{3}-\d{7}-\d{7}/g)].map(m => m[0]));
+
     const text = document.body.innerText || '';
-    return [...new Set([...text.matchAll(ORDER_RE)].map(m => m[1]))];
+    return [...new Set([...text.matchAll(ORDER_RE)].map(m => m[1]))]
+      .filter(id => !excludedIds.has(id));
   }
 
-  function updateDetectedChips(panel) {
+  function updateDetectedChips(panel, skipAutoLoad) {
     const ids = detectOrderIds();
     const bar = panel.querySelector('#sp-detected-ids');
     if (!bar) return;
@@ -468,17 +478,16 @@
       bar.appendChild(chip);
     });
 
-    // Auto-load if exactly one ID found and we haven't loaded yet
-    if (ids.length === 1 && document.getElementById('sp-status')) {
-      const input = panel.querySelector('#sp-order-input');
-      if (!input.value) {
-        input.value = ids[0];
-        fetchOrder(ids[0]);
+    // Auto-load only when API didn't already supply an order ID
+    if (!skipAutoLoad) {
+      if (ids.length === 1 && document.getElementById('sp-status')) {
+        const input = panel.querySelector('#sp-order-input');
+        if (!input.value) { input.value = ids[0]; fetchOrder(ids[0]); }
+      } else if (ids.length === 0) {
+        setStatus('No Amazon order ID found on this ticket. Paste one above.');
+      } else {
+        setStatus('Multiple order IDs found — click a chip to look up.');
       }
-    } else if (ids.length === 0) {
-      setStatus('No Amazon order ID found on this ticket. Paste one above.');
-    } else {
-      setStatus('Multiple order IDs found — click a chip to look up.');
     }
   }
 
@@ -559,12 +568,19 @@
     }
 
     function autoDetectAll() {
-      updateDetectedChips(panel);
-      getTicketASIN(asin => {
-        const detected = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
-        if (detected) {
+      // Single API call for both order ID and ASIN — avoids picking up other tabs' data
+      getTicketFields((orderId, asin) => {
+        const orderInput = panel.querySelector('#sp-order-input');
+        if (orderId && orderInput && !orderInput.value) {
+          orderInput.value = orderId;
+          fetchOrder(orderId);
+        }
+        updateDetectedChips(panel, !!orderId); // skip page-scan auto-load if API found one
+
+        const detectedAsin = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
+        if (detectedAsin) {
           const ai = document.getElementById('sp-asin-input');
-          if (ai && !ai.value) { ai.value = detected; renderProductInfo(detected); }
+          if (ai && !ai.value) { ai.value = detectedAsin; renderProductInfo(detectedAsin); }
         }
       });
     }
@@ -591,7 +607,7 @@
     let scanTimer = null;
     const observer = new MutationObserver(() => {
       clearTimeout(scanTimer);
-      scanTimer = setTimeout(() => updateDetectedChips(panel), 1200);
+      scanTimer = setTimeout(() => updateDetectedChips(panel, !!panel.querySelector('#sp-order-input')?.value), 1200);
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
