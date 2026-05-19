@@ -27,6 +27,30 @@ Adds a "Run Now" button on Amazon.de Seller Central order pages. On click, attem
 
 ---
 
+### GCX Reply (`v1.1.0`)
+**Matches:** `spigenhelp.zendesk.com/agent/tickets/*`
+
+Floating panel on Zendesk tickets that replicates and extends ChannelReply's order data. Requires the local SP-API proxy (`sp-api-proxy.py`) running on `localhost:5050`.
+
+**Order section** (via Amazon SP-API):
+- Amazon Order ID, Order Status, Purchase Date, Amount, Delivery Level, Ship Date
+- Shipping Address (collapsible), Fulfillment Channel, Ship Service Level, Buyer Name
+
+**Product Info section** (via Google Sheets ASIN lookup):
+- SKU, 모델명, 브랜드, 제조사명, 기종명, 색상명, 대분류, 생산업체, 원산지정보
+
+**How it works:**
+1. Auto-detects Amazon order IDs (`NNN-NNNNNNN-NNNNNNN`) from the ticket and fetches order data from the SP-API proxy.
+2. Auto-detects the product ASIN from Zendesk ticket custom fields (where ChannelReply stores it) or from page text, then looks up the matching row in the Spigen product Google Sheet.
+3. Both order ID and ASIN can also be entered manually.
+
+**Prerequisites:**
+- `sp-api-proxy.py` running locally (`python3 ~/Desktop/GCX/sp-api-proxy.py`)
+- Credentials configured at `~/.sp-api-config.json`
+- Logged into Google in Chrome (for Google Sheet access)
+
+---
+
 ## Installation
 
 1. Install the [Tampermonkey extension](https://www.tampermonkey.net/) in Chrome.

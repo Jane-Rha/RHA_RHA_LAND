@@ -1,21 +1,135 @@
 // ==UserScript==
-// @name         Zendesk SP-API Order Lookup
+// @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.0.0
-// @description  Amazon order data via SP-API proxy (replaces ChannelReply order section)
+// @version      1.1.0
+// @description  Amazon order data via SP-API proxy + Spigen product info from Google Sheet
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @run-at       document-idle
+// @connect      localhost
+// @connect      docs.google.com
+// @connect      sheets.googleapis.com
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const PROXY     = 'http://localhost:5050';
-  const ORDER_RE  = /\b(\d{3}-\d{7}-\d{7})\b/g;
-  const PANEL_ID  = 'sp-order-panel';
+  const PROXY      = 'http://localhost:5050';
+  const ORDER_RE   = /\b(\d{3}-\d{7}-\d{7})\b/g;
+  const ASIN_RE    = /\b(B[A-Z0-9]{9})\b/g;
+  const PANEL_ID   = 'sp-order-panel';
+  const SHEET_ID   = '1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo';
+  const SHEET_GID  = '0';
+  const SHEET_COLS = ['SKU', '모델명', '브랜드', '제조사명', '기종명', '색상명', '대분류', '생산업체', '원산지정보'];
+  const CACHE_TTL  = 30 * 60 * 1000; // 30 min
+
+  // ── Sheet cache ──────────────────────────────────────────────────────────────
+  let _sheetCache = { rows: null, headers: null, ts: 0 };
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (c === '"') {
+        if (inQ && text[i + 1] === '"') { field += '"'; i++; }
+        else inQ = !inQ;
+      } else if (c === ',' && !inQ) {
+        row.push(field); field = '';
+      } else if ((c === '\n' || c === '\r') && !inQ) {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); field = '';
+        if (row.some(Boolean)) rows.push(row);
+        row = [];
+      } else {
+        field += c;
+      }
+    }
+    if (row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function loadSheet(cb) {
+    if (_sheetCache.rows && Date.now() - _sheetCache.ts < CACHE_TTL) {
+      return cb(null, _sheetCache);
+    }
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}`;
+    GM_xmlhttpRequest({
+      method: 'GET', url,
+      onload(res) {
+        if (res.status === 200) {
+          const rows = parseCSV(res.responseText);
+          _sheetCache = { headers: rows[0], rows: rows.slice(1), ts: Date.now() };
+          cb(null, _sheetCache);
+        } else {
+          cb(new Error(`Sheet ${res.status} — are you logged into Google?`));
+        }
+      },
+      onerror() { cb(new Error('Cannot reach Google Sheets')); },
+    });
+  }
+
+  function lookupAsin(asin, cb) {
+    loadSheet((err, cache) => {
+      if (err) return cb(err, null);
+      const asinIdx = cache.headers.indexOf('ASIN');
+      const match = cache.rows.find(r => r[asinIdx] === asin);
+      if (!match) return cb(null, null);
+      const result = {};
+      SHEET_COLS.forEach(col => {
+        const i = cache.headers.indexOf(col);
+        if (i >= 0) result[col] = match[i] || '';
+      });
+      cb(null, result);
+    });
+  }
+
+  // ── Zendesk API: read ASIN from ticket custom fields ────────────────────────
+  function getTicketASIN(cb) {
+    const m = location.pathname.match(/\/tickets\/(\d+)/);
+    if (!m) return cb(null);
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: `https://spigenhelp.zendesk.com/api/v2/tickets/${m[1]}.json`,
+      onload(res) {
+        if (res.status !== 200) return cb(null);
+        try {
+          const fields = JSON.parse(res.responseText).ticket?.custom_fields || [];
+          const asinField = fields.find(f => /^B[A-Z0-9]{9}$/.test(String(f.value || '')));
+          cb(asinField?.value || null);
+        } catch { cb(null); }
+      },
+      onerror() { cb(null); },
+    });
+  }
+
+  function renderProductInfo(asin) {
+    const el = document.getElementById('sp-product-result');
+    if (!el) return;
+    el.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info for ${esc(asin)}…</div>`;
+    lookupAsin(asin, (err, info) => {
+      if (!el.isConnected) return;
+      if (err) { el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ ${esc(err.message)}</div>`; return; }
+      if (!info) { el.innerHTML = `<div style="padding:4px 14px;color:#aaa;font-size:11px;">ASIN ${esc(asin)} not found in product sheet.</div>`; return; }
+      el.innerHTML = `
+        <div style="padding:0 14px 8px;">
+          <div class="sp-block" style="margin-top:0;">
+            <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
+              📦 Product Info
+              <span class="sp-chevron">▾</span>
+            </div>
+            <div class="sp-block-body">
+              ${SHEET_COLS.map(col => row(col, info[col])).join('')}
+            </div>
+          </div>
+        </div>`;
+      el.querySelectorAll('.sp-block-title').forEach(t => {
+        t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
+      });
+    });
+  }
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   GM_addStyle(`
@@ -77,6 +191,16 @@
       outline: none;
     }
     #sp-order-input:focus { border-color: #5ba4cf; box-shadow: 0 0 0 2px rgba(91,164,207,.2); }
+    #sp-asin-input {
+      flex: 1;
+      border: 1px solid #c8cacc;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: monospace;
+      outline: none;
+    }
+    #sp-asin-input:focus { border-color: #f0a500; box-shadow: 0 0 0 2px rgba(240,165,0,.2); }
     #sp-lookup-btn {
       background: #5ba4cf;
       color: #fff;
@@ -88,6 +212,17 @@
       white-space: nowrap;
     }
     #sp-lookup-btn:hover { background: #4a8fba; }
+    #sp-product-btn {
+      background: #f0a500;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    #sp-product-btn:hover { background: #d99200; }
 
     #sp-detected-ids { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; }
     .sp-chip {
@@ -181,7 +316,7 @@
           <text x="3" y="38" font-size="38" font-family="Georgia,serif" font-style="italic" fill="#FF9900">a</text>
           <path d="M6 40 Q24 48 42 40" stroke="#FF9900" stroke-width="3" fill="none" stroke-linecap="round"/>
         </svg>
-        SP-API Order Lookup
+        GCX Reply
         <span id="sp-panel-close" title="Close">✕</span>
       </div>
       <div id="sp-panel-body">
@@ -189,10 +324,15 @@
           <input id="sp-order-input" type="text" placeholder="408-XXXXXXX-XXXXXXX" maxlength="19"/>
           <button id="sp-lookup-btn">Lookup</button>
         </div>
+        <div id="sp-id-bar" style="margin-bottom:10px;">
+          <input id="sp-asin-input" type="text" placeholder="ASIN (B0XXXXXXXXX)" maxlength="10"/>
+          <button id="sp-product-btn">Product</button>
+        </div>
         <div id="sp-detected-ids"></div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
         </div>
+        <div id="sp-product-result"></div>
       </div>
     `;
     return d;
@@ -230,9 +370,11 @@
     const ad = data.address || {};
     const b  = data.buyer   || {};
 
-    const asin    = it[0]?.ASIN || '—';
+    // Items endpoint returns 403 — ASIN is detected separately and shown in Product Info section
+    const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
+    const asin = it[0]?.ASIN || pageAsins[0] || '—';
     const amount  = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '—';
-    const buyerName = o.BuyerInfo?.BuyerName || b.BuyerName || '—';
+    const buyerName = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '—';
 
     const addrParts = [ad.Name, ad.AddressLine1, ad.AddressLine2, ad.AddressLine3,
                        [ad.City, ad.StateOrRegion, ad.PostalCode].filter(Boolean).join(' '),
@@ -264,7 +406,7 @@
           ${row('Order Status',     o.OrderStatus)}
           ${row('Purchase Date',    fmtDate(o.PurchaseDate))}
           ${row('Amount',           amount)}
-          ${row('Delivery Level',   o.ShipServiceLevelCategory)}
+          ${row('Delivery Level',   o.ShipmentServiceLevelCategory || o.ShipServiceLevelCategory)}
           ${row('Ship Date',        fmtShipRange(o.EarliestShipDate, o.LatestShipDate))}
 
           <div class="sp-block collapsed">
@@ -299,14 +441,23 @@
         if (!result) return;
         if (res.status === 200) {
           try {
-            result.innerHTML = renderOrder(JSON.parse(res.responseText), orderId);
-            // Attach collapse toggles
+            const data = JSON.parse(res.responseText);
+            result.innerHTML = renderOrder(data, orderId);
             result.querySelectorAll('.sp-block-title').forEach(title => {
               title.addEventListener('click', e => {
                 e.stopPropagation();
                 title.closest('.sp-block').classList.toggle('collapsed');
               });
             });
+
+            // Auto-fill ASIN input if not already set
+            const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
+            const detectedAsin = data.items?.[0]?.ASIN || pageAsins[0];
+            const asinInput = document.getElementById('sp-asin-input');
+            if (detectedAsin && asinInput && !asinInput.value) {
+              asinInput.value = detectedAsin;
+              renderProductInfo(detectedAsin);
+            }
           } catch (err) {
             setStatus('⚠️ Parse error: ' + err.message);
           }
@@ -423,14 +574,31 @@
       init();
     };
 
-    const input = panel.querySelector('#sp-order-input');
+    const orderInput = panel.querySelector('#sp-order-input');
+    const asinInput  = panel.querySelector('#sp-asin-input');
+
     panel.querySelector('#sp-lookup-btn').onclick = () => {
-      const id = input.value.trim();
+      const id = orderInput.value.trim();
       if (id) fetchOrder(id);
     };
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') panel.querySelector('#sp-lookup-btn').click();
-    });
+    orderInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-lookup-btn').click(); });
+
+    panel.querySelector('#sp-product-btn').onclick = () => {
+      const asin = asinInput.value.trim().toUpperCase();
+      if (asin) renderProductInfo(asin);
+    };
+    asinInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-product-btn').click(); });
+
+    // Auto-detect ASIN: Zendesk custom fields first, then page scan
+    setTimeout(() => {
+      getTicketASIN(asin => {
+        const detected = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
+        if (detected && !asinInput.value) {
+          asinInput.value = detected;
+          renderProductInfo(detected);
+        }
+      });
+    }, 2500);
 
     // Debounced MutationObserver to re-scan ticket content as it loads
     let scanTimer = null;
@@ -444,15 +612,7 @@
     setTimeout(() => updateDetectedChips(panel), 2500);
   }
 
-  // Zendesk is a SPA — wait until the ticket header is rendered
-  function waitAndInit() {
-    const check = setInterval(() => {
-      if (document.querySelector('[data-test-id="ticket-header-bar"], .ticket-container, [data-garden-id="chrome.header"]')) {
-        clearInterval(check);
-        init();
-      }
-    }, 600);
-  }
-
-  waitAndInit();
+  // Run immediately (document-idle guarantees DOM is ready);
+  // short delay lets Zendesk's React finish its first render pass.
+  setTimeout(init, 800);
 })();

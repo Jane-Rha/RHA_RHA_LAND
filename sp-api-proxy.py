@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Users/kevinkim/Desktop/GCX/.venv/bin/python3
 """
 SP-API local proxy — Zendesk Order Lookup
 Listens on http://localhost:5050
@@ -151,7 +151,7 @@ def get_order(order_id: str):
             addr   = addr_r.json().get("payload", {}).get("ShippingAddress", {}) if addr_r.ok else {}
 
             buyer_r = sp_get(endpoint, region, f"/orders/v0/orders/{order_id}/buyerInfo", cred=cred)
-            buyer   = buyer_r.json().get("payload", {}).get("BuyerInfo", {}) if buyer_r.ok else {}
+            buyer   = buyer_r.json().get("payload", {}) if buyer_r.ok else {}  # BuyerName is at payload root
 
             return {"order": order, "items": items, "address": addr, "buyer": buyer, "region": region}
 
@@ -159,6 +159,27 @@ def get_order(order_id: str):
             last_status = r.status_code  # unexpected error — keep trying but log it
 
     raise HTTPException(404, f"Order not found in any region. Last status: {last_status}")
+
+@app.get("/debug/{order_id}")
+def debug_order(order_id: str):
+    """Returns raw SP-API responses for all sub-calls — use for troubleshooting."""
+    for endpoint, region, cred in REGIONS:
+        r = sp_get(endpoint, region, f"/orders/v0/orders/{order_id}", cred=cred)
+        if r.status_code != 200:
+            continue
+        items_r = sp_get(endpoint, region, f"/orders/v0/orders/{order_id}/items", cred=cred)
+        addr_r  = sp_get(endpoint, region, f"/orders/v0/orders/{order_id}/address", cred=cred)
+        buyer_r = sp_get(endpoint, region, f"/orders/v0/orders/{order_id}/buyerInfo", cred=cred)
+        return {
+            "region": region,
+            "order_status":     r.status_code,
+            "items_status":     items_r.status_code,
+            "items_raw":        items_r.text,
+            "address_status":   addr_r.status_code,
+            "buyer_status":     buyer_r.status_code,
+            "buyer_raw":        buyer_r.text,
+        }
+    raise HTTPException(404, "Order not found")
 
 if __name__ == "__main__":
     print(f"SP-API proxy starting → http://localhost:5050")
