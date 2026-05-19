@@ -117,9 +117,10 @@ function spApiGet_(endpoint, region, cred, path) {
   const amzDate   = Utilities.formatDate(now, 'UTC', "yyyyMMdd'T'HHmmss'Z'");
   const dateStamp = Utilities.formatDate(now, 'UTC', 'yyyyMMdd');
 
-  const hdrs = { 'host': host, 'x-amz-access-token': token, 'x-amz-date': amzDate };
-  const keys = Object.keys(hdrs).sort();
-  const canonHdrs  = keys.map(k => k + ':' + hdrs[k]).join('\n') + '\n';
+  // host must be signed but UrlFetchApp rejects it as a custom header — GAS sets it automatically
+  const signHdrs = { 'host': host, 'x-amz-access-token': token, 'x-amz-date': amzDate };
+  const keys = Object.keys(signHdrs).sort();
+  const canonHdrs  = keys.map(k => k + ':' + signHdrs[k]).join('\n') + '\n';
   const signedHdrs = keys.join(';');
 
   const canonReq = ['GET', path, '', canonHdrs, signedHdrs, sha256Hex_('')].join('\n');
@@ -130,7 +131,7 @@ function spApiGet_(endpoint, region, cred, path) {
 
   const res = UrlFetchApp.fetch(endpoint + path, {
     method:             'get',
-    headers:            { ...hdrs, 'Authorization': auth },
+    headers:            { 'x-amz-access-token': token, 'x-amz-date': amzDate, 'Authorization': auth },
     muteHttpExceptions: true,
   });
   return { status: res.getResponseCode(), body: res.getContentText() };
