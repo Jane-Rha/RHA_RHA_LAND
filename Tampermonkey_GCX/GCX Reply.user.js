@@ -1,93 +1,26 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.1.0
-// @description  Amazon order data via SP-API proxy + Spigen product info from Google Sheet
+// @version      1.2.0
+// @description  Amazon order data via GAS web app + Spigen product info from Google Sheet
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @run-at       document-idle
-// @connect      localhost
-// @connect      docs.google.com
-// @connect      accounts.google.com
-// @connect      drive.google.com
 // @connect      *
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const PROXY      = 'http://localhost:5050';
+  // Replace with your deployed GAS web app URL after deploying:
+  //   GAS → Deploy → New deployment → Web app → Execute as Me → Anyone
+  const GAS_URL    = 'YOUR_GAS_WEB_APP_URL';
   const ORDER_RE   = /\b(\d{3}-\d{7}-\d{7})\b/g;
   const ASIN_RE    = /\b(B[A-Z0-9]{9})\b/g;
   const PANEL_ID   = 'sp-order-panel';
-  const SHEET_ID   = '1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo';
-  const SHEET_GID  = '0';
   const SHEET_COLS = ['SKU', '모델명', '브랜드', '제조사명', '기종명', '색상명', '대분류', '생산업체', '원산지정보'];
-  const CACHE_TTL  = 30 * 60 * 1000; // 30 min
-
-  // ── Sheet cache ──────────────────────────────────────────────────────────────
-  let _sheetCache = { rows: null, headers: null, ts: 0 };
-
-  function parseCSV(text) {
-    const rows = [];
-    let row = [], field = '', inQ = false;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (c === '"') {
-        if (inQ && text[i + 1] === '"') { field += '"'; i++; }
-        else inQ = !inQ;
-      } else if (c === ',' && !inQ) {
-        row.push(field); field = '';
-      } else if ((c === '\n' || c === '\r') && !inQ) {
-        if (c === '\r' && text[i + 1] === '\n') i++;
-        row.push(field); field = '';
-        if (row.some(Boolean)) rows.push(row);
-        row = [];
-      } else {
-        field += c;
-      }
-    }
-    if (row.length) { row.push(field); rows.push(row); }
-    return rows;
-  }
-
-  function loadSheet(cb) {
-    if (_sheetCache.rows && Date.now() - _sheetCache.ts < CACHE_TTL) {
-      return cb(null, _sheetCache);
-    }
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}`;
-    GM_xmlhttpRequest({
-      method: 'GET', url,
-      anonymous: false,
-      onload(res) {
-        if (res.status === 200) {
-          const rows = parseCSV(res.responseText);
-          _sheetCache = { headers: rows[0], rows: rows.slice(1), ts: Date.now() };
-          cb(null, _sheetCache);
-        } else {
-          cb(new Error(`Sheet returned ${res.status} — are you logged into Google?`));
-        }
-      },
-      onerror(e) { cb(new Error(`Google Sheets blocked (check @connect). Detail: ${JSON.stringify(e)}`)); },
-    });
-  }
-
-  function lookupAsin(asin, cb) {
-    loadSheet((err, cache) => {
-      if (err) return cb(err, null);
-      const asinIdx = cache.headers.indexOf('ASIN');
-      const match = cache.rows.find(r => r[asinIdx] === asin);
-      if (!match) return cb(null, null);
-      const result = {};
-      SHEET_COLS.forEach(col => {
-        const i = cache.headers.indexOf(col);
-        if (i >= 0) result[col] = match[i] || '';
-      });
-      cb(null, result);
-    });
-  }
 
   // ── Zendesk API: read ASIN from ticket custom fields ────────────────────────
   function getTicketASIN(cb) {
@@ -112,25 +45,40 @@
     const el = document.getElementById('sp-product-result');
     if (!el) return;
     el.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info for ${esc(asin)}…</div>`;
-    lookupAsin(asin, (err, info) => {
-      if (!el.isConnected) return;
-      if (err) { el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ ${esc(err.message)}</div>`; return; }
-      if (!info) { el.innerHTML = `<div style="padding:4px 14px;color:#aaa;font-size:11px;">ASIN ${esc(asin)} not found in product sheet.</div>`; return; }
-      el.innerHTML = `
-        <div style="padding:0 14px 8px;">
-          <div class="sp-block" style="margin-top:0;">
-            <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
-              📦 Product Info
-              <span class="sp-chevron">▾</span>
-            </div>
-            <div class="sp-block-body">
-              ${SHEET_COLS.map(col => row(col, info[col])).join('')}
-            </div>
-          </div>
-        </div>`;
-      el.querySelectorAll('.sp-block-title').forEach(t => {
-        t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-      });
+    GM_xmlhttpRequest({
+      method:   'GET',
+      url:      `${GAS_URL}?asin=${encodeURIComponent(asin)}`,
+      redirect: 'follow',
+      timeout:  30000,
+      onload(res) {
+        if (!el.isConnected) return;
+        try {
+          const data = JSON.parse(res.responseText);
+          if (data.error) { el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ ${esc(data.error)}</div>`; return; }
+          const info = data.product;
+          if (!info) { el.innerHTML = `<div style="padding:4px 14px;color:#aaa;font-size:11px;">ASIN ${esc(asin)} not found in product sheet.</div>`; return; }
+          el.innerHTML = `
+            <div style="padding:0 14px 8px;">
+              <div class="sp-block" style="margin-top:0;">
+                <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
+                  📦 Product Info
+                  <span class="sp-chevron">▾</span>
+                </div>
+                <div class="sp-block-body">
+                  ${SHEET_COLS.map(col => row(col, info[col])).join('')}
+                </div>
+              </div>
+            </div>`;
+          el.querySelectorAll('.sp-block-title').forEach(t => {
+            t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
+          });
+        } catch (err) {
+          if (el.isConnected) el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ Parse error: ${esc(err.message)}</div>`;
+        }
+      },
+      onerror() {
+        if (el.isConnected) el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ Cannot reach GAS endpoint.</div>`;
+      },
     });
   }
 
@@ -451,44 +399,37 @@
   function fetchOrder(orderId) {
     setStatus('⏳ Fetching order data…');
     GM_xmlhttpRequest({
-      method:  'GET',
-      url:     `${PROXY}/order/${orderId}`,
-      timeout: 20000,
+      method:   'GET',
+      url:      `${GAS_URL}?orderId=${encodeURIComponent(orderId)}`,
+      redirect: 'follow',
+      timeout:  30000,
       onload(res) {
         const result = document.getElementById('sp-result');
         if (!result) return;
-        if (res.status === 200) {
-          try {
-            const data = JSON.parse(res.responseText);
-            result.innerHTML = renderOrder(data, orderId);
-            result.querySelectorAll('.sp-block-title').forEach(title => {
-              title.addEventListener('click', e => {
-                e.stopPropagation();
-                title.closest('.sp-block').classList.toggle('collapsed');
-              });
+        try {
+          const data = JSON.parse(res.responseText);
+          if (data.error) { setStatus('⚠️ ' + data.error); return; }
+          result.innerHTML = renderOrder(data, orderId);
+          result.querySelectorAll('.sp-block-title').forEach(title => {
+            title.addEventListener('click', e => {
+              e.stopPropagation();
+              title.closest('.sp-block').classList.toggle('collapsed');
             });
+          });
 
-            // Auto-fill ASIN input if not already set
-            const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
-            const detectedAsin = data.items?.[0]?.ASIN || pageAsins[0];
-            const asinInput = document.getElementById('sp-asin-input');
-            if (detectedAsin && asinInput && !asinInput.value) {
-              asinInput.value = detectedAsin;
-              renderProductInfo(detectedAsin);
-            }
-          } catch (err) {
-            setStatus('⚠️ Parse error: ' + err.message);
+          // Auto-fill ASIN input if not already set
+          const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
+          const detectedAsin = data.items?.[0]?.ASIN || pageAsins[0];
+          const asinInput = document.getElementById('sp-asin-input');
+          if (detectedAsin && asinInput && !asinInput.value) {
+            asinInput.value = detectedAsin;
+            renderProductInfo(detectedAsin);
           }
-        } else {
-          let msg;
-          if (res.status === 0)   msg = 'Proxy offline — is sp-api-proxy.py running?';
-          else if (res.status === 404) msg = 'Order not found in any Amazon marketplace.';
-          else msg = `Error ${res.status}`;
-          try { const b = JSON.parse(res.responseText); msg = b.detail || msg; } catch {}
-          setStatus('⚠️ ' + msg);
+        } catch (err) {
+          setStatus('⚠️ Parse error: ' + err.message);
         }
       },
-      onerror()  { setStatus('⚠️ Cannot reach proxy on localhost:5050 — is it running?'); },
+      onerror()   { setStatus('⚠️ Cannot reach GAS endpoint — check GAS_URL in script settings.'); },
       ontimeout() { setStatus('⚠️ Request timed out.'); },
     });
   }

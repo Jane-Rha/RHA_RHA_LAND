@@ -27,27 +27,28 @@ Adds a "Run Now" button on Amazon.de Seller Central order pages. On click, attem
 
 ---
 
-### GCX Reply (`v1.1.0`)
+### GCX Reply (`v1.2.0`)
 **Matches:** `spigenhelp.zendesk.com/agent/tickets/*`
 
-Floating panel on Zendesk tickets that replicates and extends ChannelReply's order data. Requires the local SP-API proxy (`sp-api-proxy.py`) running on `localhost:5050`.
+Floating panel on Zendesk tickets that replicates and extends ChannelReply's order data. Backed by a Google Apps Script web app — no local server required.
 
-**Order section** (via Amazon SP-API):
+**Order section** (via Amazon SP-API through GAS):
 - Amazon Order ID, Order Status, Purchase Date, Amount, Delivery Level, Ship Date
 - Shipping Address (collapsible), Fulfillment Channel, Ship Service Level, Buyer Name
 
-**Product Info section** (via Google Sheets ASIN lookup):
+**Product Info section** (via GAS → Google Sheet ASIN lookup):
 - SKU, 모델명, 브랜드, 제조사명, 기종명, 색상명, 대분류, 생산업체, 원산지정보
 
 **How it works:**
-1. Auto-detects Amazon order IDs (`NNN-NNNNNNN-NNNNNNN`) from the ticket and fetches order data from the SP-API proxy.
-2. Auto-detects the product ASIN from Zendesk ticket custom fields (where ChannelReply stores it) or from page text, then looks up the matching row in the Spigen product Google Sheet.
+1. Auto-detects Amazon order IDs (`NNN-NNNNNNN-NNNNNNN`) from the ticket and fetches order data via the GAS web app.
+2. Auto-detects the product ASIN from Zendesk ticket custom fields (where ChannelReply stores it) or from page text, then queries the GAS web app for the matching Spigen product row.
 3. Both order ID and ASIN can also be entered manually.
 
-**Prerequisites:**
-- `sp-api-proxy.py` running locally (`python3 ~/Desktop/GCX/sp-api-proxy.py`)
-- Credentials configured at `~/.sp-api-config.json`
-- Logged into Google in Chrome (for Google Sheet access)
+**Prerequisites (first-time setup):**
+1. Open the GAS project `GCXReply_GAS` in the Apps Script editor.
+2. Set Script Properties: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `LWA_CLIENT_ID`, `LWA_CLIENT_SECRET`, `LWA_REFRESH_TOKEN`, `LWA_CLIENT_ID_JP`, `LWA_CLIENT_SECRET_JP`, `LWA_REFRESH_TOKEN_JP`.
+3. Deploy → New deployment → Web app → **Execute as: Me**, **Who has access: Anyone** → copy the URL.
+4. In the Tampermonkey script, replace `YOUR_GAS_WEB_APP_URL` with the copied URL.
 
 ---
 
