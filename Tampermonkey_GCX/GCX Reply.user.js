@@ -10,7 +10,9 @@
 // @run-at       document-idle
 // @connect      localhost
 // @connect      docs.google.com
-// @connect      sheets.googleapis.com
+// @connect      accounts.google.com
+// @connect      drive.google.com
+// @connect      *
 // ==/UserScript==
 
 (function () {
@@ -58,16 +60,17 @@
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}`;
     GM_xmlhttpRequest({
       method: 'GET', url,
+      anonymous: false,
       onload(res) {
         if (res.status === 200) {
           const rows = parseCSV(res.responseText);
           _sheetCache = { headers: rows[0], rows: rows.slice(1), ts: Date.now() };
           cb(null, _sheetCache);
         } else {
-          cb(new Error(`Sheet ${res.status} — are you logged into Google?`));
+          cb(new Error(`Sheet returned ${res.status} — are you logged into Google?`));
         }
       },
-      onerror() { cb(new Error('Cannot reach Google Sheets')); },
+      onerror(e) { cb(new Error(`Google Sheets blocked (check @connect). Detail: ${JSON.stringify(e)}`)); },
     });
   }
 
@@ -589,16 +592,46 @@
     };
     asinInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-product-btn').click(); });
 
-    // Auto-detect ASIN: Zendesk custom fields first, then page scan
-    setTimeout(() => {
+    // ── Reset panel when ticket changes ────────────────────────────────────────
+    function resetPanel() {
+      orderInput.value = '';
+      asinInput.value  = '';
+      const result = document.getElementById('sp-result');
+      if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
+      const productResult = document.getElementById('sp-product-result');
+      if (productResult) productResult.innerHTML = '';
+      const chips = document.getElementById('sp-detected-ids');
+      if (chips) chips.innerHTML = '';
+    }
+
+    function autoDetectAll() {
+      updateDetectedChips(panel);
       getTicketASIN(asin => {
         const detected = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
-        if (detected && !asinInput.value) {
-          asinInput.value = detected;
-          renderProductInfo(detected);
+        if (detected) {
+          const ai = document.getElementById('sp-asin-input');
+          if (ai && !ai.value) { ai.value = detected; renderProductInfo(detected); }
         }
       });
-    }, 2500);
+    }
+
+    // Intercept Zendesk SPA navigation (pushState + popstate)
+    let lastTicketId = location.pathname.match(/\/tickets\/(\d+)/)?.[1];
+    let navTimer = null;
+    function onNav() {
+      const newId = location.pathname.match(/\/tickets\/(\d+)/)?.[1];
+      if (newId && newId !== lastTicketId) {
+        lastTicketId = newId;
+        resetPanel();
+        clearTimeout(navTimer);
+        navTimer = setTimeout(autoDetectAll, 2500);
+      }
+    }
+    const origPush    = history.pushState.bind(history);
+    const origReplace = history.replaceState.bind(history);
+    history.pushState    = (...a) => { origPush(...a);    onNav(); };
+    history.replaceState = (...a) => { origReplace(...a); onNav(); };
+    window.addEventListener('popstate', onNav);
 
     // Debounced MutationObserver to re-scan ticket content as it loads
     let scanTimer = null;
@@ -608,8 +641,8 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Initial scan after Zendesk renders the ticket conversation
-    setTimeout(() => updateDetectedChips(panel), 2500);
+    // Initial scan on first load
+    setTimeout(autoDetectAll, 2500);
   }
 
   // Run immediately (document-idle guarantees DOM is ready);
