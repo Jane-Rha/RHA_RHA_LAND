@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy this file to ~/.sp-api-config.json and fill in your SP-API credentials.",
+
+  "lwa_client_id":     "amzn1.application-oa2-client.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "lwa_client_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "refresh_token":     "Atzr|XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+
+  "aws_access_key_id":     "AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+}
