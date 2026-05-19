@@ -144,6 +144,7 @@ function fetchOrderData_(orderId) {
     if (r.status !== 200) continue;
 
     const order  = JSON.parse(r.body).payload || {};
+    if (!order.AmazonOrderId) continue; // 200 but error body (wrong region) — try next
     const itemsR = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/items`);
     const addrR  = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/address`);
     const buyerR = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/buyerInfo`);
