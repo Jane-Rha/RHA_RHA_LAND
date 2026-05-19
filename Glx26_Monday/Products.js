@@ -225,7 +225,7 @@ function pollProductRunAndWrite() {
  * 🔥 FILTERED DATASET FETCH (CORE CHANGE)
  **********************************************************/
 function _fetchAllDatasetItems_filtered_(datasetId, token) {
-  const baseUrl = `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`;
+  const baseUrl = `https://api.apify.com/v2/datasets/${datasetId}/items?clean=true&format=json&token=${token}`;
 
   let offset = 0;
   const limit = 1000;
@@ -242,6 +242,11 @@ function _fetchAllDatasetItems_filtered_(datasetId, token) {
     const items = JSON.parse(resp.getContentText());
     if (!items || items.length === 0) break;
 
+    if (offset === 0 && items.length > 0) {
+      Logger.log('[Product] Raw field names from first item: ' + JSON.stringify(Object.keys(items[0])));
+      Logger.log('[Product] First item sample: ' + JSON.stringify(items[0]).slice(0, 500));
+    }
+
     const filtered = items.map(i => ({
       asin: i.asin || '',
       countReview: i.countReview || i.reviewCount || '',
@@ -257,12 +262,13 @@ function _fetchAllDatasetItems_filtered_(datasetId, token) {
     if (items.length < limit) break;
   }
 
-  // Deduplicate by ASIN — a fresh retry run appends to the same dataset so
-  // the same products appear twice. Keep the last occurrence (most recent scrape).
+  // Deduplicate by ASIN+URL — a fresh retry run appends to the same dataset so
+  // the same ASIN×marketplace pair appears twice. Keep the last occurrence.
+  // Using ASIN+URL (not just ASIN) preserves one row per marketplace per product.
   const seen = new Map();
   for (const item of allItems) {
-    const key = item.asin || item.url;
-    if (key) seen.set(key, item);
+    const key = (item.asin || '') + '|' + (item.url || '');
+    if (key !== '|') seen.set(key, item);
   }
   return [...seen.values()];
 }
