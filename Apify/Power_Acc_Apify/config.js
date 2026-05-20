@@ -1,7 +1,7 @@
 const CONFIG = {
   sheetBaseName: 'Apify',
   timezone: 'Asia/Seoul',
-  actorTaskIdOrSlug: 'TvUlCaUpNvjgC23g5',
+  actorTaskIdOrSlug: 'TgpoNoMcN4a5bYsyX',
   datasetFormat: 'json',
   pollIntervalMinutes: 1,
   pollMaxMinutes: 180,

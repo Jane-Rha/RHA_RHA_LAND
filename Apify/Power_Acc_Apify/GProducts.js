@@ -2,7 +2,7 @@
  * PRODUCT CONFIG (NO CONFIG REFERENCES HERE)
  **********************************************************/
 const PRODUCT = {
-  taskIdOrSlug: 'IVyCSWNhyHTfkgRhp',
+  taskIdOrSlug: 'fh2EbyE6tR2J9Lp26',
   sheetBaseName: 'Product'
 };
 
