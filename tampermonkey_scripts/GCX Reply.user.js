@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.5.1
+// @version      1.5.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -687,10 +687,21 @@
           lastOrderData = data;
           maybeShowAutoFill(document.getElementById(PANEL_ID));
 
-          const panelEl  = document.getElementById(PANEL_ID);
           const asinInput = document.getElementById('sp-asin-input');
-          const panelAsin = asinInput?.value.trim() || '';
-          result.innerHTML = renderOrder(data, orderId, panelAsin);
+          const itemAsins = (data.items || []).map(i => i.ASIN).filter(Boolean);
+
+          // Resolve ASIN before rendering: SP-API items > current input > page scan
+          let resolvedAsin = asinInput?.value.trim() || '';
+          if (itemAsins.length) {
+            if (asinInput && !asinInput.value) asinInput.value = itemAsins.join(', ');
+            resolvedAsin = asinInput?.value.trim() || itemAsins[0] || '';
+          } else if (!resolvedAsin) {
+            const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
+            const detected  = pageAsins[0];
+            if (detected && asinInput) { asinInput.value = detected; resolvedAsin = detected; }
+          }
+
+          result.innerHTML = renderOrder(data, orderId, resolvedAsin);
           result.querySelectorAll('.sp-block-title').forEach(title => {
             title.addEventListener('click', e => {
               e.stopPropagation();
@@ -698,18 +709,8 @@
             });
           });
 
-          const itemAsins = (data.items || []).map(i => i.ASIN).filter(Boolean);
-          if (itemAsins.length) {
-            if (asinInput && !asinInput.value) asinInput.value = itemAsins.join(', ');
-            renderAllProducts(itemAsins);
-          } else {
-            const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
-            const detected  = pageAsins[0];
-            if (detected && asinInput && !asinInput.value) {
-              asinInput.value = detected;
-              renderAllProducts([detected]);
-            }
-          }
+          if (itemAsins.length) renderAllProducts(itemAsins);
+          else if (resolvedAsin) renderAllProducts([resolvedAsin]);
         } catch (err) {
           setStatus('⚠️ Parse error: ' + err.message);
         }
