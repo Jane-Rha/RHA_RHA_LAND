@@ -225,7 +225,7 @@
 
   function putZdTicket(ticketId, af, btn, panel) {
     if (!af.length) {
-      if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-Fill'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
       setFillStatus(panel, 'Nothing to fill.');
       return;
     }
@@ -236,11 +236,11 @@
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
       data:    JSON.stringify({ ticket: { custom_fields: af } }),
       onload(res) {
-        if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-Fill'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
         setFillStatus(panel, res.status === 200 ? `✓ ${af.length} fields saved` : `⚠️ API error ${res.status}`);
       },
       onerror() {
-        if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-Fill'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
         setFillStatus(panel, '⚠️ Network error');
       },
     });
@@ -294,7 +294,7 @@
           const msg = error || `${esc(asin)} not found in product sheet.`;
           return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">⚠️ ${esc(msg)}</div>`;
         }
-        const label = asins.length > 1 ? `📦 ${esc(asin)}` : '📦 Product Info';
+        const label = asins.length > 1 ? esc(asin) : 'Product Info';
         return `
           <div class="sp-block" style="margin-top:0;">
             <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
@@ -531,7 +531,7 @@
         </div>
         <div id="sp-detected-ids"></div>
         <div id="sp-autofill-bar">
-          <button id="sp-autofill-btn">✨ Auto-Fill Fields</button>
+          <button id="sp-autofill-btn">Auto-Fill Form</button>
           <div id="sp-fill-status"></div>
         </div>
         <div id="sp-result">
@@ -790,7 +790,7 @@
     if (!toggleBtn) {
       toggleBtn = document.createElement('button');
       toggleBtn.id          = 'sp-toggle-btn';
-      toggleBtn.textContent = '📦 Order Lookup';
+      toggleBtn.textContent = 'Order Lookup';
       document.body.appendChild(toggleBtn);
     }
 
