@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.5.0
+// @version      1.5.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -88,9 +88,19 @@
     return 'others';
   }
 
-  function sellerCentralUrl(orderId, salesChannel) {
-    if (!orderId || !salesChannel) return null;
-    return `https://sellercentral.${salesChannel.toLowerCase()}/orders-v3/order/${orderId}`;
+  const COUNTRY_SC = {
+    DE:'amazon.de', FR:'amazon.fr', IT:'amazon.it', ES:'amazon.es',
+    NL:'amazon.nl', PL:'amazon.pl', SE:'amazon.se', BE:'amazon.be',
+    GB:'amazon.co.uk', JP:'amazon.co.jp', IN:'amazon.in',
+    SG:'amazon.com.sg', AU:'amazon.com.au', CA:'amazon.ca',
+    MX:'amazon.com.mx', TR:'amazon.com.tr', US:'amazon.com',
+  };
+
+  function sellerCentralUrl(orderId, salesChannel, countryCode) {
+    if (!orderId) return null;
+    const domain = salesChannel ? salesChannel.toLowerCase()
+      : (countryCode ? (COUNTRY_SC[countryCode] || null) : null);
+    return domain ? `https://sellercentral.${domain}/orders-v3/order/${orderId}` : null;
   }
 
   // Normalize label text: strip ★ * ( ) . and trim, lowercase
@@ -568,9 +578,12 @@
     </div>`;
   }
 
-  function rowReturnAsin(asinStr, salesChannel) {
+  function rowReturnAsin(asinStr, salesChannel, itemsStatus) {
     if (!asinStr || asinStr === '—') {
-      return `<div class="sp-row"><span class="sp-label">Return ASIN</span><span class="sp-val">—</span></div>`;
+      const note = itemsStatus === 403
+        ? `<span style="font-size:10.5px;color:#e67e22;margin-left:4px;">(GetOrderItems 권한 필요)</span>`
+        : '';
+      return `<div class="sp-row"><span class="sp-label">Return ASIN</span><span class="sp-val">—${note}</span></div>`;
     }
     const ch = (salesChannel || 'amazon.com').toLowerCase();
     const links = asinStr.split(',').map(a => a.trim()).filter(Boolean).map(asin => {
@@ -616,7 +629,7 @@
       ? ` <span style="color:#888;font-size:11px;">(총 ${data.orderCount}건)</span>` : '';
 
     return `
-      ${rowReturnAsin(returnAsin, o.SalesChannel)}
+      ${rowReturnAsin(returnAsin, o.SalesChannel, data.itemsStatus)}
 
       <div class="sp-block">
         <div class="sp-block-title">
@@ -628,7 +641,7 @@
           <span class="sp-chevron">▾</span>
         </div>
         <div class="sp-block-body">
-          ${rowLinked('Amazon Order ID', orderId, sellerCentralUrl(orderId, o.SalesChannel))}
+          ${rowLinked('Amazon Order ID', orderId, sellerCentralUrl(orderId, o.SalesChannel, ad.CountryCode))}
           ${row('Order Status',     o.OrderStatus)}
           ${row('Purchase Date',    fmtDate(o.PurchaseDate))}
           ${row('Amount',           amount)}
