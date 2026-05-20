@@ -343,7 +343,7 @@ function _processFilterSheet_(srcSS, cfg) {
 
   function cell(row, i) { return i >= 0 && i < row.length ? String(row[i]||"").trim() : ""; }
   function fmtISO(v) {
-    if (v instanceof Date) return Utilities.formatDate(v, "UTC", "yyyy-MM-dd");
+    if (v instanceof Date) return Utilities.formatDate(v, "Asia/Seoul", "yyyy-MM-dd");
     return String(v||"").trim();
   }
 
@@ -565,7 +565,7 @@ function _processTo13_(srcSS, cfg) {
 
   function cell(row, i) { return i >= 0 && i < row.length ? String(row[i]||"").trim() : ""; }
   function fmtISO(v) {
-    if (v instanceof Date) return Utilities.formatDate(v, "UTC", "yyyy-MM-dd");
+    if (v instanceof Date) return Utilities.formatDate(v, "Asia/Seoul", "yyyy-MM-dd");
     return String(v||"").trim();
   }
 
