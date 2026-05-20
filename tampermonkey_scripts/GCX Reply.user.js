@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.4.0
+// @version      1.5.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -35,6 +35,9 @@
     POINT_OF_PUR:  20016270875033,
     DEVICE:        360022185671,
     PRODUCT_NAME:  360022185891,
+    TOTAL_ORDERS:  21714421937305,
+    TOTAL_REFUNDS: 21745453864345,
+    SPIGEN_REFUND: 21745465897369,
   };
 
   const COUNTRY_MAP = {
@@ -83,6 +86,11 @@
     if (s.includes('.de') || s.includes('.fr') || s.includes('.it') ||
         s.includes('.es') || s.includes('.nl')) return 'amazon_eu';
     return 'others';
+  }
+
+  function sellerCentralUrl(orderId, salesChannel) {
+    if (!orderId || !salesChannel) return null;
+    return `https://sellercentral.${salesChannel.toLowerCase()}/orders-v3/order/${orderId}`;
   }
 
   // Normalize label text: strip ★ * ( ) . and trim, lowercase
@@ -159,8 +167,16 @@
     const b  = lastOrderData.buyer   || {};
     const p  = lastProductData || {};
 
-    const orderId      = panel.querySelector('#sp-order-input')?.value.trim() || '';
-    const asin         = panel.querySelector('#sp-asin-input')?.value.trim()  || '';
+    const orderId   = panel.querySelector('#sp-order-input')?.value.trim() || '';
+    const panelAsin = panel.querySelector('#sp-asin-input')?.value.trim()  || '';
+    // ASIN: prefer order item ASINs, fall back to panel input
+    const itemAsins  = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
+    const asinValue  = itemAsins.length ? itemAsins.join(', ') : panelAsin;
+    // SKU: prefer order items SellerSKU, fall back to product sheet
+    const itemSku    = lastOrderData.items?.[0]?.SellerSKU || p.SKU || '';
+    // Order count → ✅전체 주문 dropdown
+    const orderCount    = lastOrderData.orderCount;
+    const orderCountVal = orderCount != null ? `q${Math.min(orderCount, 50)}` : null;
     const buyerName    = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '';
     const orderTotal   = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '';
     const purchaseDateIso = o.PurchaseDate ? o.PurchaseDate.slice(0, 10) : '';
@@ -171,8 +187,8 @@
 
     // 1. DOM fill visible text fields immediately
     fillZdInput('Order ID',           orderId);
-    fillZdInput('ASIN',               asin);
-    fillZdInput('문의SKU',            p.SKU           || '');
+    fillZdInput('ASIN',               asinValue);
+    fillZdInput('문의SKU',            itemSku);
     fillZdInput('Customer Full Name', buyerName);
     fillZdInput('Purchase Date',      purchaseDateDom);
     fillZdInput('Order Status',       o.OrderStatus   || '');
@@ -182,8 +198,9 @@
     // 2. Build Zendesk API fields array
     const af = [];
     if (orderId)                             af.push({ id: ZD.ORDER_ID,      value: orderId });
-    if (asin)                                af.push({ id: ZD.ASIN,          value: asin });
-    if (p.SKU)                               af.push({ id: ZD.SKU,           value: p.SKU });
+    if (asinValue)                           af.push({ id: ZD.ASIN,          value: asinValue });
+    if (itemSku)                             af.push({ id: ZD.SKU,           value: itemSku });
+    if (orderCountVal)                       af.push({ id: ZD.TOTAL_ORDERS,  value: orderCountVal });
     if (buyerName)                           af.push({ id: ZD.CUST_NAME,     value: buyerName });
     if (o.OrderStatus)                       af.push({ id: ZD.ORDER_STATUS,  value: o.OrderStatus });
     if (orderTotal)                          af.push({ id: ZD.ORDER_TOTAL,   value: orderTotal });
@@ -232,49 +249,68 @@
   // ── Product info renderer ────────────────────────────────────────────────
 
   function renderProductInfo(asin) {
-    const el = document.getElementById('sp-product-result');
-    if (!el) return;
-    el.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info for ${esc(asin)}…</div>`;
-    GM_xmlhttpRequest({
-      method:   'GET',
-      url:      `${GAS_URL}?asin=${encodeURIComponent(asin)}`,
-      redirect: 'follow',
-      timeout:  30000,
-      onload(res) {
-        if (!el.isConnected) return;
-        try {
-          const data = JSON.parse(res.responseText);
-          if (data.error) { el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ ${esc(data.error)}</div>`; return; }
-          const info = data.product;
-          if (!info) { el.innerHTML = `<div style="padding:4px 14px;color:#aaa;font-size:11px;">ASIN ${esc(asin)} not found in product sheet.</div>`; return; }
+    renderAllProducts([asin]);
+  }
 
-          // Store for auto-fill
-          lastProductData = info;
-          maybeShowAutoFill(document.getElementById(PANEL_ID));
+  function renderAllProducts(asins) {
+    const container = document.getElementById('sp-product-result');
+    if (!container) return;
+    if (!asins.length) { container.innerHTML = ''; return; }
+    container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info…</div>`;
 
-          el.innerHTML = `
-            <div style="padding:0 14px 8px;">
-              <div class="sp-block" style="margin-top:0;">
-                <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
-                  📦 Product Info
-                  <span class="sp-chevron">▾</span>
-                </div>
-                <div class="sp-block-body">
-                  ${SHEET_COLS.map(col => row(col, info[col])).join('')}
-                </div>
-              </div>
-            </div>`;
-          el.querySelectorAll('.sp-block-title').forEach(t => {
-            t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-          });
-        } catch (err) {
-          if (el.isConnected) el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ Parse error: ${esc(err.message)}</div>`;
-        }
-      },
-      onerror() {
-        if (el.isConnected) el.innerHTML = `<div style="padding:4px 14px;color:#c00;font-size:11px;">⚠️ Cannot reach GAS endpoint.</div>`;
-      },
+    let loaded = 0;
+    const results = new Array(asins.length).fill(null);
+
+    asins.forEach((asin, idx) => {
+      GM_xmlhttpRequest({
+        method:   'GET',
+        url:      `${GAS_URL}?asin=${encodeURIComponent(asin)}`,
+        redirect: 'follow',
+        timeout:  30000,
+        onload(res) {
+          try {
+            const data = JSON.parse(res.responseText);
+            results[idx] = { asin, product: data.product || null, error: data.error || null };
+          } catch (err) {
+            results[idx] = { asin, product: null, error: 'Parse error: ' + err.message };
+          }
+          if (++loaded === asins.length) finish();
+        },
+        onerror() {
+          results[idx] = { asin, product: null, error: 'Cannot reach GAS endpoint.' };
+          if (++loaded === asins.length) finish();
+        },
+      });
     });
+
+    function finish() {
+      if (!container.isConnected) return;
+      const valid = results.filter(r => r.product);
+      lastProductData = valid[0]?.product || null;
+      maybeShowAutoFill(document.getElementById(PANEL_ID));
+
+      container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, error }) => {
+        if (!product) {
+          const msg = error || `${esc(asin)} not found in product sheet.`;
+          return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">⚠️ ${esc(msg)}</div>`;
+        }
+        const label = asins.length > 1 ? `📦 ${esc(asin)}` : '📦 Product Info';
+        return `
+          <div class="sp-block" style="margin-top:0;">
+            <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
+              ${label}
+              <span class="sp-chevron">▾</span>
+            </div>
+            <div class="sp-block-body">
+              ${SHEET_COLS.map(col => row(col, product[col])).join('')}
+            </div>
+          </div>`;
+      }).join('')}</div>`;
+
+      container.querySelectorAll('.sp-block-title').forEach(t => {
+        t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
+      });
+    }
   }
 
   // ── Styles ───────────────────────────────────────────────────────────────
@@ -532,31 +568,36 @@
     </div>`;
   }
 
-  function amazonUrl(asin, salesChannel) {
-    if (!asin || asin === '—') return null;
-    const domain = salesChannel ? salesChannel.toLowerCase() : 'amazon.com';
-    return `https://www.${domain}/dp/${asin}`;
+  function rowReturnAsin(asinStr, salesChannel) {
+    if (!asinStr || asinStr === '—') {
+      return `<div class="sp-row"><span class="sp-label">Return ASIN</span><span class="sp-val">—</span></div>`;
+    }
+    const ch = (salesChannel || 'amazon.com').toLowerCase();
+    const links = asinStr.split(',').map(a => a.trim()).filter(Boolean).map(asin => {
+      const url = `https://www.${ch}/dp/${asin}`;
+      return `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;">${esc(asin)}</a>`;
+    }).join(', ');
+    return `<div class="sp-row"><span class="sp-label">Return ASIN</span><span class="sp-val">${links}</span></div>`;
   }
 
-  function rowAsin(asin, salesChannel) {
-    const url = amazonUrl(asin, salesChannel);
-    const val = url
-      ? `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;font-weight:500;">${esc(asin)}</a>`
-      : `<span class="sp-val">${esc(asin) || '—'}</span>`;
-    return `<div class="sp-row"><span class="sp-label">Return ASIN</span>${url ? val : `<span class="sp-val">—</span>`}</div>`;
+  function rowLinked(label, text, url) {
+    const cell = url
+      ? `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;font-weight:500;">${esc(text)}</a>`
+      : `<span class="sp-val">${esc(text) || '—'}</span>`;
+    return `<div class="sp-row"><span class="sp-label">${esc(label)}</span>${cell}</div>`;
   }
 
   // ── Render order data ─────────────────────────────────────────────────────
-  function renderOrder(data, orderId) {
+  function renderOrder(data, orderId, panelAsin) {
     const o  = data.order   || {};
     const it = data.items   || [];
     const ad = data.address || {};
     const b  = data.buyer   || {};
 
-    const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
-    const asin = it[0]?.ASIN || pageAsins[0] || '—';
-    const amount  = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '—';
-    const buyerName = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '—';
+    const itemAsins  = it.map(i => i.ASIN).filter(Boolean);
+    const returnAsin = itemAsins.length ? itemAsins.join(', ') : (panelAsin || '—');
+    const amount     = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '—';
+    const buyerName  = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '—';
 
     const addrParts = [ad.Name, ad.AddressLine1, ad.AddressLine2, ad.AddressLine3,
                        [ad.City, ad.StateOrRegion, ad.PostalCode].filter(Boolean).join(' '),
@@ -571,8 +612,11 @@
       return row(item.SellerSKU || item.ASIN, `${item.QuantityOrdered}×  ${title}`);
     }).join('');
 
+    const orderCountNote = data.orderCount != null
+      ? ` <span style="color:#888;font-size:11px;">(총 ${data.orderCount}건)</span>` : '';
+
     return `
-      ${rowAsin(asin, o.SalesChannel)}
+      ${rowReturnAsin(returnAsin, o.SalesChannel)}
 
       <div class="sp-block">
         <div class="sp-block-title">
@@ -580,11 +624,11 @@
             <text x="3" y="38" font-size="38" font-family="Georgia,serif" font-style="italic" fill="#FF9900">a</text>
             <path d="M6 40 Q24 47 42 40" stroke="#FF9900" stroke-width="3" fill="none" stroke-linecap="round"/>
           </svg>
-          Order
+          Order${orderCountNote}
           <span class="sp-chevron">▾</span>
         </div>
         <div class="sp-block-body">
-          ${row('Amazon Order ID', orderId, true)}
+          ${rowLinked('Amazon Order ID', orderId, sellerCentralUrl(orderId, o.SalesChannel))}
           ${row('Order Status',     o.OrderStatus)}
           ${row('Purchase Date',    fmtDate(o.PurchaseDate))}
           ${row('Amount',           amount)}
@@ -605,7 +649,7 @@
           ${row('Ship Service Level',  o.ShipServiceLevel)}
           ${row('Buyer Name',          buyerName)}
 
-          ${it.length > 1 ? `<div class="sp-items-title">Items (${it.length})</div>${itemRows}` : ''}
+          ${it.length > 0 ? `<div class="sp-items-title">Items (${it.length})</div>${itemRows}` : ''}
         </div>
       </div>
     `;
@@ -630,7 +674,10 @@
           lastOrderData = data;
           maybeShowAutoFill(document.getElementById(PANEL_ID));
 
-          result.innerHTML = renderOrder(data, orderId);
+          const panelEl  = document.getElementById(PANEL_ID);
+          const asinInput = document.getElementById('sp-asin-input');
+          const panelAsin = asinInput?.value.trim() || '';
+          result.innerHTML = renderOrder(data, orderId, panelAsin);
           result.querySelectorAll('.sp-block-title').forEach(title => {
             title.addEventListener('click', e => {
               e.stopPropagation();
@@ -638,12 +685,17 @@
             });
           });
 
-          const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
-          const detectedAsin = data.items?.[0]?.ASIN || pageAsins[0];
-          const asinInput = document.getElementById('sp-asin-input');
-          if (detectedAsin && asinInput && !asinInput.value) {
-            asinInput.value = detectedAsin;
-            renderProductInfo(detectedAsin);
+          const itemAsins = (data.items || []).map(i => i.ASIN).filter(Boolean);
+          if (itemAsins.length) {
+            if (asinInput && !asinInput.value) asinInput.value = itemAsins.join(', ');
+            renderAllProducts(itemAsins);
+          } else {
+            const pageAsins = [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))];
+            const detected  = pageAsins[0];
+            if (detected && asinInput && !asinInput.value) {
+              asinInput.value = detected;
+              renderAllProducts([detected]);
+            }
           }
         } catch (err) {
           setStatus('⚠️ Parse error: ' + err.message);
@@ -766,8 +818,10 @@
     orderInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-lookup-btn').click(); });
 
     panel.querySelector('#sp-product-btn').onclick = () => {
-      const asin = asinInput.value.trim().toUpperCase();
-      if (asin) renderProductInfo(asin);
+      const raw = asinInput.value.trim().toUpperCase();
+      if (!raw) return;
+      const asins = raw.split(',').map(a => a.trim()).filter(Boolean);
+      renderAllProducts(asins);
     };
     asinInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-product-btn').click(); });
 

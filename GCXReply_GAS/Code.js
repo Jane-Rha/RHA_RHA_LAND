@@ -15,6 +15,35 @@ const REGIONS = [
   { endpoint: 'https://sellingpartnerapi-na.amazon.com', region: 'us-east-1', cred: 'main' },
 ];
 
+// SalesChannel suffix → SP-API Marketplace ID (order matters: longest suffix first)
+const MARKETPLACE_MAP = [
+  ['.com.sg', 'A19VAU5U5O7RUS'],
+  ['.com.au', 'A39IBJ37TRP1C6'],
+  ['.com.mx', 'A1AM78C64UM0Y8'],
+  ['.com.tr', 'A33AVAJ2PDY3EV'],
+  ['.co.uk',  'A1F83G8C2ARO7P'],
+  ['.co.jp',  'A1VC38T7YXB528'],
+  ['.de',     'A1PA6795UKMFR9'],
+  ['.fr',     'A13V1IB3VIYZZH'],
+  ['.it',     'APJ6JRA9NG5V4'],
+  ['.es',     'A1RKKUPIHCS9HS'],
+  ['.nl',     'A1805IZSGTT6HS'],
+  ['.pl',     'AZ1PBY3F3E3AE'],
+  ['.se',     'A2NODRKZP88ZB9'],
+  ['.be',     'AMEN7PMS3EDWL'],
+  ['.in',     'A21TJRUUN4KGV'],
+  ['.ca',     'A2EUQ1WTGCTBG2'],
+  ['.tr',     'A33AVAJ2PDY3EV'],
+  ['.com',    'ATVPDKIKX0DER'],
+];
+
+function marketplaceId_(salesChannel) {
+  if (!salesChannel) return null;
+  const s = salesChannel.toLowerCase();
+  const match = MARKETPLACE_MAP.find(([suffix]) => s.includes(suffix));
+  return match ? match[1] : null;
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 function doGet(e) {
   try {
@@ -106,7 +135,7 @@ function signingKey_(secret, dateStamp, region) {
   return hmac_(kService, 'aws4_request');
 }
 
-function spApiGet_(endpoint, region, cred, path) {
+function spApiGet_(endpoint, region, cred, fullPath) {
   const props     = PropertiesService.getScriptProperties().getProperties();
   const accessKey = props['AWS_ACCESS_KEY_ID'];
   const secretKey = props['AWS_SECRET_ACCESS_KEY'];
@@ -117,19 +146,32 @@ function spApiGet_(endpoint, region, cred, path) {
   const amzDate   = Utilities.formatDate(now, 'UTC', "yyyyMMdd'T'HHmmss'Z'");
   const dateStamp = Utilities.formatDate(now, 'UTC', 'yyyyMMdd');
 
+  // Split path from query string — SigV4 canonical request requires them separately
+  const qIdx      = fullPath.indexOf('?');
+  const uriPath   = qIdx >= 0 ? fullPath.slice(0, qIdx) : fullPath;
+  const rawQuery  = qIdx >= 0 ? fullPath.slice(qIdx + 1) : '';
+  const canonQuery = rawQuery
+    ? rawQuery.split('&').map(pair => {
+        const eq = pair.indexOf('=');
+        const k  = eq >= 0 ? pair.slice(0, eq) : pair;
+        const v  = eq >= 0 ? pair.slice(eq + 1) : '';
+        return encodeURIComponent(decodeURIComponent(k)) + '=' + encodeURIComponent(decodeURIComponent(v));
+      }).sort().join('&')
+    : '';
+
   // host must be signed but UrlFetchApp rejects it as a custom header — GAS sets it automatically
   const signHdrs = { 'host': host, 'x-amz-access-token': token, 'x-amz-date': amzDate };
   const keys = Object.keys(signHdrs).sort();
   const canonHdrs  = keys.map(k => k + ':' + signHdrs[k]).join('\n') + '\n';
   const signedHdrs = keys.join(';');
 
-  const canonReq = ['GET', path, '', canonHdrs, signedHdrs, sha256Hex_('')].join('\n');
+  const canonReq = ['GET', uriPath, canonQuery, canonHdrs, signedHdrs, sha256Hex_('')].join('\n');
   const scope    = `${dateStamp}/${region}/execute-api/aws4_request`;
   const sts      = ['AWS4-HMAC-SHA256', amzDate, scope, sha256Hex_(canonReq)].join('\n');
   const sig      = hmacHex_(signingKey_(secretKey, dateStamp, region), sts);
   const auth     = `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHdrs}, Signature=${sig}`;
 
-  const res = UrlFetchApp.fetch(endpoint + path, {
+  const res = UrlFetchApp.fetch(endpoint + fullPath, {
     method:             'get',
     headers:            { 'x-amz-access-token': token, 'x-amz-date': amzDate, 'Authorization': auth },
     muteHttpExceptions: true,
@@ -137,7 +179,22 @@ function spApiGet_(endpoint, region, cred, path) {
   return { status: res.getResponseCode(), body: res.getContentText() };
 }
 
-// ── Fetch order + address + buyer ─────────────────────────────────────────────
+// ── Buyer order count (capped at 50) ─────────────────────────────────────────
+function fetchBuyerOrders_(endpoint, region, cred, salesChannel, buyerEmail) {
+  const mpId = marketplaceId_(salesChannel);
+  if (!mpId || !buyerEmail) return null;
+  const path = `/orders/v0/orders?MarketplaceIds=${encodeURIComponent(mpId)}&BuyerEmail=${encodeURIComponent(buyerEmail)}&MaxResultsPerPage=50`;
+  const r = spApiGet_(endpoint, region, cred, path);
+  if (r.status !== 200) return null;
+  try {
+    const d = JSON.parse(r.body);
+    const orders  = d.payload?.Orders || [];
+    const hasMore = !!d.payload?.NextToken;
+    return hasMore ? 50 : orders.length;
+  } catch { return null; }
+}
+
+// ── Fetch order + items + address + buyer ─────────────────────────────────────
 function fetchOrderData_(orderId) {
   for (const { endpoint, region, cred } of REGIONS) {
     const r = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}`);
@@ -145,15 +202,21 @@ function fetchOrderData_(orderId) {
 
     const order  = JSON.parse(r.body).payload || {};
     if (!order.AmazonOrderId) continue; // 200 but error body (wrong region) — try next
+
     const itemsR = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/items`);
     const addrR  = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/address`);
     const buyerR = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/buyerInfo`);
 
+    const buyer      = buyerR.status === 200 ? JSON.parse(buyerR.body).payload || {} : {};
+    const orderCount = fetchBuyerOrders_(endpoint, region, cred, order.SalesChannel, buyer.BuyerEmail || null);
+
     return {
       order,
-      items:   itemsR.status === 200 ? JSON.parse(itemsR.body).payload?.OrderItems || [] : [],
-      address: addrR.status  === 200 ? JSON.parse(addrR.body).payload?.ShippingAddress || {} : {},
-      buyer:   buyerR.status === 200 ? JSON.parse(buyerR.body).payload || {} : {},
+      items:       itemsR.status === 200 ? JSON.parse(itemsR.body).payload?.OrderItems || [] : [],
+      itemsStatus: itemsR.status,
+      address:     addrR.status  === 200 ? JSON.parse(addrR.body).payload?.ShippingAddress || {} : {},
+      buyer,
+      orderCount,
       region,
     };
   }
