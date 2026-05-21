@@ -156,8 +156,17 @@ function updateSlideTextBoxes() {
 }
 
 function replaceTextOnSlide(slide, replacements) {
-  slide.getPageElements().forEach(function(element) {
-    if (element.getPageElementType() !== SlidesApp.PageElementType.SHAPE) return;
+  _replaceInElements(slide.getPageElements(), replacements);
+}
+
+function _replaceInElements(elements, replacements) {
+  elements.forEach(function(element) {
+    const type = element.getPageElementType();
+    if (type === SlidesApp.PageElementType.GROUP) {
+      _replaceInElements(element.asGroup().getChildren(), replacements);
+      return;
+    }
+    if (type !== SlidesApp.PageElementType.SHAPE) return;
 
     const shape = element.asShape();
     const textRange = shape.getText();
