@@ -529,13 +529,20 @@ function refreshLinkedCharts(slide) {
 }
 
 function findPlaceholderShape(slide, placeholder) {
-  const elements = slide.getPageElements();
+  return _findShapeInElements(slide.getPageElements(), placeholder);
+}
+
+function _findShapeInElements(elements, placeholder) {
   for (let i = 0; i < elements.length; i++) {
     const element = elements[i];
-    if (element.getPageElementType() !== SlidesApp.PageElementType.SHAPE) continue;
-    const shape = element.asShape();
-    if (shape.getText().asString().indexOf(placeholder) !== -1) {
-      return shape;
+    const type = element.getPageElementType();
+    if (type === SlidesApp.PageElementType.GROUP) {
+      const found = _findShapeInElements(element.asGroup().getChildren(), placeholder);
+      if (found) return found;
+    }
+    if (type !== SlidesApp.PageElementType.SHAPE) continue;
+    if (element.asShape().getText().asString().indexOf(placeholder) !== -1) {
+      return element.asShape();
     }
   }
   return null;
