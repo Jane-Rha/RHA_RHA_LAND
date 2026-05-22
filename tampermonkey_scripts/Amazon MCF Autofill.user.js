@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.7
+// @version      0.8.8
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -514,60 +514,55 @@ async function fetchOrderIdByEmail(email) {
     const timer = setInterval(() => {
       attempts++;
 
-      // Walk all text nodes looking for "N fulfillable" pattern
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      const entries = [];
-      let node;
-      while ((node = walker.nextNode())) {
-        const raw = (node.nodeValue || '').trim();
-        const m = raw.match(/^([\d,]+)\s+fulfillable/i);
-        if (!m) continue;
-        const count = parseInt(m[1].replace(/,/g, ''), 10);
+      const components = [...document.querySelectorAll('.search-result-component')];
+      if (components.length === 0) {
+        if (attempts > 60) { clearInterval(timer); LOG('autoSelectBestSku: no results after 30s.'); }
+        return;
+      }
 
-        // Walk up to find the row ancestor (tr, kat-table-row, or a div that
-        // looks like a row — stop after 8 levels)
-        let row = node.parentElement;
-        for (let i = 0; i < 8; i++) {
-          if (!row) break;
-          const tag = row.tagName;
-          const cls = (row.className || '').toLowerCase();
-          const role = (row.getAttribute('role') || '').toLowerCase();
-          if (tag === 'TR' || tag === 'KAT-TABLE-ROW' || role === 'row' ||
-              cls.includes('result') || cls.includes('item-row') || cls.includes('sku-row')) {
-            break;
+      // Parse fulfillable count from each result row
+      const entries = components.map(comp => {
+        const qtyEl = comp.querySelector('.search-result-component-quantity');
+        const text = (qtyEl ? qtyEl.textContent : '').trim();
+        const m = text.match(/([\d,]+)\s+fulfillable/i);
+        const count = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+        return { count, comp };
+      });
+      entries.sort((a, b) => b.count - a.count);
+      const best = entries[0];
+
+      const xBtn = best.comp.querySelector('.search-result-x');
+      if (!xBtn) {
+        if (attempts > 60) { clearInterval(timer); LOG('autoSelectBestSku: .search-result-x not found.'); }
+        return;
+      }
+
+      clearInterval(timer);
+
+      // 1. Try React fiber onClick (React 18 delegates to root; direct .click() on the
+      //    div host works, but kat-icon shadow-DOM children may swallow the event)
+      const fKey = Object.keys(xBtn).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
+      if (fKey) {
+        let fiber = xBtn[fKey];
+        while (fiber) {
+          if (fiber.memoizedProps && typeof fiber.memoizedProps.onClick === 'function') {
+            fiber.memoizedProps.onClick({ preventDefault() {}, stopPropagation() {}, type: 'click', target: xBtn });
+            LOG('autoSelectBestSku: fired React onClick,', best.count, 'fulfillable');
+            msg(`SKU selected (${best.count.toLocaleString()} fulfillable).`);
+            return;
           }
-          row = row.parentElement;
-        }
-        if (row) entries.push({ count, row });
-      }
-
-      if (entries.length > 0) {
-        // Pick the row with highest fulfillable count
-        entries.sort((a, b) => b.count - a.count);
-        const best = entries[0];
-
-        // Find the + / Add button within that row
-        const addBtn = [...best.row.querySelectorAll('button, kat-button')].find(b => {
-          const txt = (b.textContent || '').trim();
-          const lbl = (b.getAttribute('label') || '').trim();
-          const icn = (b.getAttribute('icon') || '').trim();
-          return txt === '+' || lbl === '+' || icn === 'add' || icn === 'plus' ||
-                 txt.toLowerCase() === 'add' || lbl.toLowerCase() === 'add';
-        });
-
-        if (addBtn) {
-          addBtn.click();
-          clearInterval(timer);
-          LOG('Auto-selected SKU with', best.count, 'fulfillable units');
-          msg(`SKU selected (${best.count.toLocaleString()} fulfillable).`);
-          return;
+          fiber = fiber.return;
         }
       }
 
-      if (attempts > 60) { // 60 × 500ms = 30s timeout
-        clearInterval(timer);
-        LOG('autoSelectBestSku: no results after 30s.');
-      }
+      // 2. Fallback: dispatch full pointer + mouse + click sequence on the div host itself
+      ['pointerover','pointerenter','mouseover','mouseenter',
+       'pointermove','mousemove','pointerdown','mousedown',
+       'pointerup','mouseup','click'].forEach(type =>
+        xBtn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, composed: true, view: window }))
+      );
+      LOG('autoSelectBestSku: dispatched pointer events,', best.count, 'fulfillable');
+      msg(`SKU selected (${best.count.toLocaleString()} fulfillable).`);
     }, 500);
   }
 
