@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.6.0
+// @version      1.6.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -752,6 +752,8 @@
 
     const existingSet = new Set([...bar.querySelectorAll('.sp-chip')].map(c => c.dataset.id));
     if (ids.length === existingSet.size && ids.every(id => existingSet.has(id))) return;
+    // Don't wipe chips when an order is already loaded / being fetched
+    if (ids.length === 0 && existingSet.size > 0) return;
 
     bar.innerHTML = '';
     ids.forEach(id => {
