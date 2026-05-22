@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.6.1
+// @version      1.7.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -671,6 +671,35 @@
     `;
   }
 
+  // ── Seller Central orders-api fallback for ASIN + SKU ────────────────────
+  // Uses the user's existing SC session cookies — no extra auth needed.
+  // Endpoint: sellercentral.{domain}/orders-api/order/{orderId}
+  // Works for all marketplaces; derives domain from SalesChannel (e.g. "Amazon.co.jp").
+  function fetchScItems(orderId, salesChannel, countryCode, cb) {
+    const scPageUrl = sellerCentralUrl(orderId, salesChannel, countryCode);
+    if (!scPageUrl) return cb(null);
+    const apiUrl = scPageUrl.replace('/orders-v3/order/', '/orders-api/order/');
+    GM_xmlhttpRequest({
+      method:   'GET',
+      url:      apiUrl,
+      headers:  { 'Accept': 'application/json' },
+      redirect: 'follow',
+      timeout:  20000,
+      onload(res) {
+        if (res.status !== 200) return cb(null);
+        try {
+          const d = JSON.parse(res.responseText);
+          const items = (d.order?.orderItems || [])
+            .map(it => ({ ASIN: it.ASIN, SellerSKU: it.SellerSKU, Title: it.Title, QuantityOrdered: it.QuantityOrdered }))
+            .filter(it => it.ASIN);
+          cb(items.length ? items : null);
+        } catch { cb(null); }
+      },
+      onerror()   { cb(null); },
+      ontimeout() { cb(null); },
+    });
+  }
+
   // ── Fetch order via GAS ───────────────────────────────────────────────────
   function fetchOrder(orderId) {
     setStatus('⏳ Fetching order data…');
@@ -712,8 +741,29 @@
             });
           });
 
-          if (itemAsins.length) renderAllProducts(itemAsins);
-          else if (resolvedAsin) renderAllProducts([resolvedAsin]);
+          if (itemAsins.length) {
+            renderAllProducts(itemAsins);
+          } else if (resolvedAsin) {
+            renderAllProducts([resolvedAsin]);
+          } else if (data.itemsStatus !== 200) {
+            // SP-API items blocked → query Seller Central orders-api silently with user's SC session
+            const asinValEl = result.querySelector('.sp-row .sp-val');
+            if (asinValEl) asinValEl.textContent = '🔍 Seller Central…';
+            fetchScItems(orderId, data.order?.SalesChannel, data.address?.CountryCode, scItems => {
+              if (!result.isConnected) return;
+              if (scItems && scItems.length) {
+                lastOrderData.items = scItems;
+                const newAsins = scItems.map(i => i.ASIN).filter(Boolean);
+                if (asinInput && !asinInput.value) asinInput.value = newAsins.join(', ');
+                result.innerHTML = renderOrder(Object.assign({}, data, { items: scItems }), orderId, newAsins.join(', '));
+                result.querySelectorAll('.sp-block-title').forEach(t => {
+                  t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
+                });
+                renderAllProducts(newAsins);
+                maybeShowAutoFill(document.getElementById(PANEL_ID));
+              }
+            });
+          }
         } catch (err) {
           setStatus('⚠️ Parse error: ' + err.message);
         }
