@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.5.2
+// @version      1.6.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -55,22 +55,25 @@
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
     const m = location.pathname.match(/\/tickets\/(\d+)/);
-    if (!m) return cb(null, null);
+    if (!m) return cb(null, null, []);
     GM_xmlhttpRequest({
       method: 'GET',
       url: `https://spigenhelp.zendesk.com/api/v2/tickets/${m[1]}.json`,
       onload(res) {
-        if (res.status !== 200) return cb(null, null);
+        if (res.status !== 200) return cb(null, null, []);
         try {
-          const ticket = JSON.parse(res.responseText).ticket || {};
-          const fields = ticket.custom_fields || [];
-          const vals   = fields.map(f => String(f.value || ''));
+          const ticket  = JSON.parse(res.responseText).ticket || {};
+          const fields  = ticket.custom_fields || [];
+          const vals    = fields.map(f => String(f.value || ''));
           const orderId = vals.find(v => /^\d{3}-\d{7}-\d{7}$/.test(v)) || null;
           const asin    = vals.find(v => /^B[A-Z0-9]{9}$/.test(v)) || null;
-          cb(orderId, asin);
-        } catch { cb(null, null); }
+          // Also scan the customer message body for order IDs
+          const desc    = ticket.description || '';
+          const bodyIds = [...new Set([...desc.matchAll(/\b(\d{3}-\d{7}-\d{7})\b/g)].map(x => x[1]))];
+          cb(orderId, asin, bodyIds);
+        } catch { cb(null, null, []); }
       },
-      onerror() { cb(null, null); },
+      onerror() { cb(null, null, []); },
     });
   }
 
@@ -740,13 +743,15 @@
       .filter(id => !excludedIds.has(id));
   }
 
-  function updateDetectedChips(panel, skipAutoLoad) {
-    const ids = detectOrderIds();
+  function updateDetectedChips(panel, skipAutoLoad, extraIds = []) {
+    const domIds = detectOrderIds();
+    // API-sourced IDs (from ticket description) take priority; DOM scan fills the rest
+    const ids = [...new Set([...extraIds, ...domIds])];
     const bar = panel.querySelector('#sp-detected-ids');
     if (!bar) return;
 
-    const current = [...bar.querySelectorAll('.sp-chip')].map(c => c.dataset.id).join(',');
-    if (current === ids.join(',')) return;
+    const existingSet = new Set([...bar.querySelectorAll('.sp-chip')].map(c => c.dataset.id));
+    if (ids.length === existingSet.size && ids.every(id => existingSet.has(id))) return;
 
     bar.innerHTML = '';
     ids.forEach(id => {
@@ -859,13 +864,18 @@
     }
 
     function autoDetectAll() {
-      getTicketFields((orderId, asin) => {
+      getTicketFields((orderId, asin, bodyIds) => {
         const orderInput = panel.querySelector('#sp-order-input');
         if (orderId && orderInput && !orderInput.value) {
+          // Custom field has order ID → use it directly, chips are informational only
           orderInput.value = orderId;
           fetchOrder(orderId);
+          updateDetectedChips(panel, true);
+        } else {
+          // No custom field order ID → merge message-body IDs with DOM scan
+          // If exactly 1 total → auto-fetch; if multiple → show chips for user to pick
+          updateDetectedChips(panel, false, bodyIds);
         }
-        updateDetectedChips(panel, !!orderId);
 
         const detectedAsin = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
         if (detectedAsin) {
