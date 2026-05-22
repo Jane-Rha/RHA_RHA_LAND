@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.4
+// @version      0.8.5
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -139,12 +139,14 @@
     const header = sr.querySelector('.select-header, [part="dropdown-header"]');
     if (header) header.click();
 
-    // Poll for kat-option[value="XX"] in the shadow root, then click it
+    // Poll until kat-option is VISIBLE (offsetParent !== null means the panel is open)
+    // The option element always exists in the shadow root even when the panel is closed,
+    // so checking existence alone is wrong — we must wait for it to become visible.
     let attempts = 0;
     const timer = setInterval(() => {
       attempts++;
       const opt = sr.querySelector(`kat-option[value="${upper}"]`);
-      if (opt) {
+      if (opt && opt.offsetParent !== null) {
         ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(evt =>
           opt.dispatchEvent(new MouseEvent(evt, { bubbles: true, composed: true }))
         );
@@ -154,7 +156,7 @@
       }
       if (attempts > 30) {
         clearInterval(timer);
-        LOG('Could not find kat-option for', upper);
+        LOG('Could not find visible kat-option for', upper);
       }
     }, 100);
 
@@ -446,21 +448,21 @@ async function fetchOrderIdByEmail(email) {
 
       return (data.orderId || '').trim();
     } catch (e) {
-      LOG('fetchOrderIdByEmail error (attempt failed)', e);
+      LOG('fetchOrderIdByEmail attempt failed', e);
       return null;
     }
   }
 
-  // First attempt
-  let orderId = await tryFetch();
-  if (orderId) return orderId;
-
-  // Retry once with slight delay
-  LOG('Order ID fetch failed → retrying…');
-  await sleep(500);
-
-  orderId = await tryFetch();
-  return orderId || null;
+  const MAX_RETRIES = 8;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    if (i > 0) {
+      msg(`Order ID: retry ${i}/${MAX_RETRIES - 1}…`);
+      await sleep(1500);
+    }
+    const orderId = await tryFetch();
+    if (orderId) return orderId;
+  }
+  return null;
 }
 
   // ---------------------------------
@@ -505,6 +507,71 @@ async function fetchOrderIdByEmail(email) {
   }
 
   // ---------------------------------
+  // AUTO-SELECT SKU (highest fulfillable)
+  // ---------------------------------
+  function autoSelectBestSku() {
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts++;
+
+      // Walk all text nodes looking for "N fulfillable" pattern
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const entries = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        const raw = (node.nodeValue || '').trim();
+        const m = raw.match(/^([\d,]+)\s+fulfillable/i);
+        if (!m) continue;
+        const count = parseInt(m[1].replace(/,/g, ''), 10);
+
+        // Walk up to find the row ancestor (tr, kat-table-row, or a div that
+        // looks like a row — stop after 8 levels)
+        let row = node.parentElement;
+        for (let i = 0; i < 8; i++) {
+          if (!row) break;
+          const tag = row.tagName;
+          const cls = (row.className || '').toLowerCase();
+          const role = (row.getAttribute('role') || '').toLowerCase();
+          if (tag === 'TR' || tag === 'KAT-TABLE-ROW' || role === 'row' ||
+              cls.includes('result') || cls.includes('item-row') || cls.includes('sku-row')) {
+            break;
+          }
+          row = row.parentElement;
+        }
+        if (row) entries.push({ count, row });
+      }
+
+      if (entries.length > 0) {
+        // Pick the row with highest fulfillable count
+        entries.sort((a, b) => b.count - a.count);
+        const best = entries[0];
+
+        // Find the + / Add button within that row
+        const addBtn = [...best.row.querySelectorAll('button, kat-button')].find(b => {
+          const txt = (b.textContent || '').trim();
+          const lbl = (b.getAttribute('label') || '').trim();
+          const icn = (b.getAttribute('icon') || '').trim();
+          return txt === '+' || lbl === '+' || icn === 'add' || icn === 'plus' ||
+                 txt.toLowerCase() === 'add' || lbl.toLowerCase() === 'add';
+        });
+
+        if (addBtn) {
+          addBtn.click();
+          clearInterval(timer);
+          LOG('Auto-selected SKU with', best.count, 'fulfillable units');
+          msg(`SKU selected (${best.count.toLocaleString()} fulfillable).`);
+          return;
+        }
+      }
+
+      if (attempts > 60) { // 60 × 500ms = 30s timeout
+        clearInterval(timer);
+        LOG('autoSelectBestSku: no results after 30s.');
+      }
+    }, 500);
+  }
+
+  // ---------------------------------
   // fillAll()
   // ---------------------------------
   function fillAll({ name, street, city, state, postal, phone, email, country, countryRaw, q }) {
@@ -527,7 +594,18 @@ async function fetchOrderIdByEmail(email) {
       setCountry(country);
     }
 
-    if (q) setById('sku-search-input', q) || setById('katal-id-10', q);
+    if (q) {
+      setById('sku-search-input', q) || setById('katal-id-10', q);
+      // Trigger ASIN search by pressing Enter on the inner input after a short settle
+      setTimeout(() => {
+        const inner = document.getElementById('sku-search-input')
+          ?.shadowRoot?.querySelector('input');
+        if (inner) {
+          inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, composed: true }));
+          inner.dispatchEvent(new KeyboardEvent('keyup',  { key: 'Enter', keyCode: 13, bubbles: true, composed: true }));
+        }
+      }, 400);
+    }
 
     return ok;
   }
@@ -566,15 +644,18 @@ async function fetchOrderIdByEmail(email) {
 
       fillAll(d);
 
+      if (d.q) autoSelectBestSku();
+
       if (d.email) {
         markRowMcfByEmail(d.email);
+        msg('Fetching Order ID…');
         const order = await fetchOrderIdByEmail(d.email);
-          if (order) {
-              setOrderIdInput(order);
-              msg('Order ID auto-filled.');
-          } else {
-              msg('Order ID not found (2 attempts).');
-          }
+        if (order) {
+          setOrderIdInput(order);
+          msg('Order ID auto-filled.');
+        } else {
+          msg('Order ID not found after retries.');
+        }
       }
 
       ensureExpeditedAfterReady();
