@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.0
+// @version      1.9.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -115,9 +115,32 @@
     return countryCode ? (COUNTRY_SC[countryCode] || 'amazon.com') : 'amazon.com';
   }
 
-  // Parse Amazon product page static HTML → sheet-column-shaped object
+  // Try to extract Spigen model name from product title
+  // "Spigen Liquid Air | iPhone 15 Case"   → "Liquid Air"
+  // "Spigen Case for iPhone 15 Liquid Air Case..." → "Liquid Air"
+  function modelFromTitle_(title) {
+    if (!title) return '';
+    // Pattern 1: "Brand Model | Device ..." — model between brand and pipe
+    const pipeMatch = title.match(/^[A-Za-z]+\s+(.+?)\s+[|｜]/);
+    if (pipeMatch && !/^(case|cover|protector|glass|film)/i.test(pipeMatch[1]))
+      return pipeMatch[1].trim();
+    // Pattern 2: strip "Spigen (Case|Cover) for" prefix, then strip device name, grab until next Case/Cover
+    const noBrand = title.replace(/^[A-Za-z]+\s+/i, '').replace(/^(?:Case|Cover)\s+for\s+/i, '');
+    const devStrip = noBrand.replace(
+      /^(?:for\s+)?(?:iPhone|Samsung(?:\s+Galaxy)?|Galaxy|Google\s+Pixel|Pixel|iPad|Huawei|Xiaomi|OnePlus|LG)\s+[\w\s]*?(?=\b[A-Z][a-z])/,
+      ''
+    );
+    const modelMatch = devStrip.match(/^([A-Z][^\|]+?)\s+(?:Case|Cover|Protector|Glass|Film|Screen)\b/i);
+    if (modelMatch) return modelMatch[1].trim();
+    return '';
+  }
+
+  // Parse Amazon product page static HTML → sheet-column-shaped object.
+  // Handles both tech-spec table (amazon.in/com) and po-* overview rows (amazon.de etc.)
   function parseAmazonPage_(doc) {
     const spec = {};
+
+    // Tech spec table — amazon.com, amazon.in, amazon.co.jp (with ?language=en_GB)
     doc.querySelectorAll(
       '#productDetails_techSpec_section_1 tr, #productDetails_db_sections tr, .prodDetTable tr'
     ).forEach(tr => {
@@ -125,28 +148,41 @@
       const v = tr.querySelector('td')?.textContent?.replace(/\s+/g, ' ').trim();
       if (k && v) spec[k] = v;
     });
-    const mfr = (spec['Manufacturer'] || '').split('/')[0].replace(/,.*$/, '').trim();
+
+    // Product overview rows — amazon.de, amazon.fr, etc. (after ?language=en_GB → English keys)
+    doc.querySelectorAll('tr[class*="po-"]').forEach(row => {
+      const k = row.querySelector('.a-span3 span, td:first-child span')?.textContent?.trim();
+      const v = row.querySelector('.a-span9 span, td:last-child span')?.textContent?.trim();
+      if (k && v) spec[k] = v;
+    });
+
+    const title = doc.querySelector('#productTitle')?.textContent?.trim() || '';
+    const mfr   = (spec['Manufacturer'] || '').split('/')[0].replace(/,.*$/, '').trim();
+
     return {
-      SKU:      spec['Model Number']            || '',
-      '모델명':  spec['Model Name']              || '',
-      '브랜드':  spec['Brand Name']              || 'Spigen',
+      SKU:      spec['Model Number']                                              || '',
+      '모델명':  spec['Model Name']  || modelFromTitle_(title)                   || '',
+      '브랜드':  spec['Brand Name']  || spec['Brand']                            || 'Spigen',
       '제조사명': mfr,
-      '기종명':  spec['Compatible Phone Models'] || spec['Compatible Devices'] || '',
-      '색상명':  spec['Colour']                  || spec['Color'] || '',
-      '대분류':  spec['Form Factor']             || spec['Item Type Name'] || '',
+      '기종명':  spec['Compatible Phone Models'] || spec['Compatible phone models'] ||
+                 spec['Compatible Devices']      || spec['Compatible devices']      || '',
+      '색상명':  spec['Colour'] || spec['Color']                                 || '',
+      '대분류':  spec['Form Factor'] || spec['Item Type Name']                   || '',
       '생산업체': mfr,
-      '원산지정보': spec['Country of Origin'] || spec['Country of origin'] || '',
+      '원산지정보': spec['Country of Origin'] || spec['Country of origin']       || '',
     };
   }
 
   // Fetch amazon.XX/dp/{asin} HTML and parse product info; cb(product|null, pageUrl)
   function fetchAmazonProduct_(asin, cb) {
-    const domain = amazonDomain_(lastOrderData?.order?.SalesChannel, lastOrderData?.address?.CountryCode);
-    const url    = `https://www.${domain}/dp/${asin}`;
+    const domain   = amazonDomain_(lastOrderData?.order?.SalesChannel, lastOrderData?.address?.CountryCode);
+    // Force English spec keys on non-US storefronts so our key names always match
+    const langParam = domain === 'amazon.com' ? '' : '?language=en_GB';
+    const url       = `https://www.${domain}/dp/${asin}${langParam}`;
     GM_xmlhttpRequest({
       method:   'GET',
       url,
-      headers:  { 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html' },
+      headers:  { 'Accept-Language': 'en-GB,en;q=0.9', 'Accept': 'text/html' },
       redirect: 'follow',
       timeout:  20000,
       onload(res) {
