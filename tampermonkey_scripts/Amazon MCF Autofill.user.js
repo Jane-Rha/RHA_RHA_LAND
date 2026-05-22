@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.1
+// @version      0.8.2
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -281,7 +281,7 @@
 
     const unlabel = s =>
       s.replace(/^(.+?):\s*/i, '')
-       .replace(/^(.+?)\-\s*/i, '')
+       .replace(/^(.+?)\s+--?\s*/i, '')
        .trim();
 
     for (const line of t.split('\n').map(s => s.trim()).filter(Boolean)) {
