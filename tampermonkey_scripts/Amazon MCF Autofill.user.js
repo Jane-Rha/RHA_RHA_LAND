@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.2
+// @version      0.8.3
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -255,10 +255,12 @@
       let email = extractBestEmail(t) || '';
     let ticketCountryRaw =
       (t.match(/Country\*?\s*[:\-：]\s*([^\n]+)/i) || [])[1] ||
+      (t.match(/^Country\*\n([A-Za-z]{2})\s*$/m) || [])[1] ||
       (t.match(/국가\s*[:\-：]\s*([^\n]+)/i) || [])[1] ||
       '';
 
-    ticketCountryRaw = (ticketCountryRaw || '').trim();
+    // Strip trailing non-alpha chars, e.g. "IT)" from "(Country: IT)"
+    ticketCountryRaw = (ticketCountryRaw || '').trim().replace(/\W+$/, '').trim();
     const ticketCountry = normCountryToken(ticketCountryRaw);
 
     const numberedLine = /^\s*\(?(\d+)\)?[.)]\s*(.+)$/i;
