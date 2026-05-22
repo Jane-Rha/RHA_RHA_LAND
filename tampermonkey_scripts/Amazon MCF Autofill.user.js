@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.6
+// @version      0.8.7
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -206,7 +206,7 @@
       .replace(/[ \t]+/g, ' ')
       .trim();
 
-      const asin = (t.match(/\bASIN\b[^\w]{0,5}([A-Z0-9]{8,12})/i) || [])[1];
+      const asin = (t.match(/\bASIN\b[^\w]{0,5}(B[A-Z0-9]{9})\b/i) || [])[1];
       const sku  = (t.match(/\bSKU\b[^\w]{0,5}([\w.-]{5,})/i) || [])[1];
       const q = asin || sku || '';
 
