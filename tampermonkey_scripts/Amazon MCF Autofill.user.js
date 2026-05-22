@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.3
+// @version      0.8.4
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -123,83 +123,40 @@
   const setById = (id, v) =>
     v ? setKatInput(document.getElementById(id), v) : false;
       // ---------------------------------
-  // COUNTRY DROPDOWN — FULL FIX
+  // COUNTRY DROPDOWN
   // ---------------------------------
   function setCountry(code) {
     if (!code) return false;
     const upper = code.toUpperCase().replace(/^UK$/, 'GB').replace(/^EL$/, 'GR');
 
     const dd = document.querySelector('kat-dropdown[label="Country"]');
-    if (!dd) {
-      LOG('Country dropdown not found yet.');
-      return false;
-    }
+    if (!dd) { LOG('Country dropdown not found.'); return false; }
 
-    try {
-      // Attempt 1: set programmatically
-      dd.value = upper;
-      dd.setAttribute('value', upper);
-      dd.dispatchEvent(new Event('input', { bubbles: true }));
-      dd.dispatchEvent(new Event('change', { bubbles: true }));
+    const sr = dd.shadowRoot;
+    if (!sr) { LOG('Country dropdown has no shadow root.'); return false; }
 
-      // Verify
-      if (dd.value === upper) {
-        LOG('Country set via direct value =', upper);
-        return true;
-      }
-    } catch (e) {
-      LOG('Direct country set failed, trying shadow fallback', e);
-    }
+    // Open the dropdown by clicking the header
+    const header = sr.querySelector('.select-header, [part="dropdown-header"]');
+    if (header) header.click();
 
-    return clickCountryDropdownOption(dd, upper);
-  }
-
-  // ---------------------------------
-  // SHADOW DOM FALLBACK CLICK
-  // ---------------------------------
-  function clickCountryDropdownOption(dd, value) {
-    if (!dd) return false;
-
-    try {
-      dd.click(); // open dropdown
-    } catch {}
-
-    const openMenu = () => {
-      try {
-        const shadow = dd.shadowRoot;
-        if (!shadow) return null;
-
-        return shadow.querySelector('kat-menu, kat-select-menu, [part="menu"], ul, div.options');
-      } catch {
-        return null;
-      }
-    };
-
+    // Poll for kat-option[value="XX"] in the shadow root, then click it
     let attempts = 0;
     const timer = setInterval(() => {
       attempts++;
-      const menu = openMenu();
-      if (menu) {
-        const options = menu.querySelectorAll('[value], kat-option, li, div.option');
-        for (const opt of options) {
-          const v = opt.getAttribute('value') || opt.dataset.value || '';
-          if (v.toUpperCase() === value.toUpperCase()) {
-            opt.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-            opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-            opt.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-            opt.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            clearInterval(timer);
-
-            LOG('Country set via shadow-click =', value);
-            return true;
-          }
-        }
-      }
-      if (attempts > 25) {
+      const opt = sr.querySelector(`kat-option[value="${upper}"]`);
+      if (opt) {
+        ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(evt =>
+          opt.dispatchEvent(new MouseEvent(evt, { bubbles: true, composed: true }))
+        );
         clearInterval(timer);
-        LOG('Could not find dropdown option for', value);
+        LOG('Country set via kat-option click =', upper);
+        return;
       }
-    }, 120);
+      if (attempts > 30) {
+        clearInterval(timer);
+        LOG('Could not find kat-option for', upper);
+      }
+    }, 100);
 
     return true;
   }
