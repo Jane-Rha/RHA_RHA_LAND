@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.8.1
+// @version      1.9.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -15,6 +15,7 @@
   'use strict';
 
   const GAS_URL    = 'https://script.google.com/macros/s/AKfycbw2Vdwk197LXB6oUAzuHS8sKamD5uqKZJDLvcHzbftWJk-M65XV1fAnTqiZo7ZEm4hk/exec';
+  const SHEET_URL  = 'https://docs.google.com/spreadsheets/d/1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo/edit?gid=0#gid=0';
   const ORDER_RE   = /\b(\d{3}-\d{7}-\d{7})\b/g;
   const ASIN_RE    = /\b(B[A-Z0-9]{9})\b/g;
   const PANEL_ID   = 'sp-order-panel';
@@ -106,6 +107,59 @@
     const domain = salesChannel ? salesChannel.toLowerCase()
       : (countryCode ? (COUNTRY_SC[countryCode] || null) : null);
     return domain ? `https://sellercentral.${domain}/orders-v3/order/${orderId}` : null;
+  }
+
+  // Derive amazon.XX domain from order SalesChannel / CountryCode
+  function amazonDomain_(salesChannel, countryCode) {
+    if (salesChannel) return salesChannel.toLowerCase(); // "amazon.in", "amazon.co.jp", etc.
+    return countryCode ? (COUNTRY_SC[countryCode] || 'amazon.com') : 'amazon.com';
+  }
+
+  // Parse Amazon product page static HTML → sheet-column-shaped object
+  function parseAmazonPage_(doc) {
+    const spec = {};
+    doc.querySelectorAll(
+      '#productDetails_techSpec_section_1 tr, #productDetails_db_sections tr, .prodDetTable tr'
+    ).forEach(tr => {
+      const k = tr.querySelector('th')?.textContent?.trim();
+      const v = tr.querySelector('td')?.textContent?.replace(/\s+/g, ' ').trim();
+      if (k && v) spec[k] = v;
+    });
+    const mfr = (spec['Manufacturer'] || '').split('/')[0].replace(/,.*$/, '').trim();
+    return {
+      SKU:      spec['Model Number']            || '',
+      '모델명':  spec['Model Name']              || '',
+      '브랜드':  spec['Brand Name']              || 'Spigen',
+      '제조사명': mfr,
+      '기종명':  spec['Compatible Phone Models'] || spec['Compatible Devices'] || '',
+      '색상명':  spec['Colour']                  || spec['Color'] || '',
+      '대분류':  spec['Form Factor']             || spec['Item Type Name'] || '',
+      '생산업체': mfr,
+      '원산지정보': spec['Country of Origin'] || spec['Country of origin'] || '',
+    };
+  }
+
+  // Fetch amazon.XX/dp/{asin} HTML and parse product info; cb(product|null, pageUrl)
+  function fetchAmazonProduct_(asin, cb) {
+    const domain = amazonDomain_(lastOrderData?.order?.SalesChannel, lastOrderData?.address?.CountryCode);
+    const url    = `https://www.${domain}/dp/${asin}`;
+    GM_xmlhttpRequest({
+      method:   'GET',
+      url,
+      headers:  { 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html' },
+      redirect: 'follow',
+      timeout:  20000,
+      onload(res) {
+        if (res.status !== 200) return cb(null, url);
+        try {
+          const doc     = new DOMParser().parseFromString(res.responseText, 'text/html');
+          const product = parseAmazonPage_(doc);
+          cb(Object.values(product).some(v => v) ? product : null, url);
+        } catch { cb(null, url); }
+      },
+      onerror()   { cb(null, url); },
+      ontimeout() { cb(null, url); },
+    });
   }
 
   // Normalize label text: strip ★ * ( ) . and trim, lowercase
@@ -346,6 +400,8 @@
     let loaded = 0;
     const results = new Array(asins.length).fill(null);
 
+    function done(idx) { if (++loaded === asins.length) finish(); }
+
     asins.forEach((asin, idx) => {
       GM_xmlhttpRequest({
         method:   'GET',
@@ -355,35 +411,66 @@
         onload(res) {
           try {
             const data = JSON.parse(res.responseText);
-            results[idx] = { asin, product: data.product || null, error: data.error || null };
+            if (data.product) {
+              // Found in Google Sheet
+              results[idx] = { asin, product: data.product, source: 'sheet' };
+              done(idx);
+            } else {
+              // Not in sheet → fall back to Amazon product page
+              fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
+                results[idx] = {
+                  asin,
+                  product:    amazonProduct,
+                  source:     amazonProduct ? 'amazon' : null,
+                  sourceUrl:  amazonUrl,
+                  error:      amazonProduct ? null : `${asin} not found in sheet or Amazon page.`,
+                };
+                done(idx);
+              });
+            }
           } catch (err) {
-            results[idx] = { asin, product: null, error: 'Parse error: ' + err.message };
+            results[idx] = { asin, product: null, source: null, error: 'Parse error: ' + err.message };
+            done(idx);
           }
-          if (++loaded === asins.length) finish();
         },
         onerror() {
-          results[idx] = { asin, product: null, error: 'Cannot reach GAS endpoint.' };
-          if (++loaded === asins.length) finish();
+          results[idx] = { asin, product: null, source: null, error: 'Cannot reach GAS endpoint.' };
+          done(idx);
         },
       });
     });
 
+    function sourceBadge_(source, sourceUrl) {
+      if (source === 'sheet') {
+        return `<a href="${esc(SHEET_URL)}" target="_blank" rel="noopener"
+          style="font-size:10px;font-weight:normal;background:#34a853;color:#fff;
+                 padding:1px 6px;border-radius:3px;margin-left:6px;text-decoration:none;">Sheet</a>`;
+      }
+      if (source === 'amazon') {
+        return `<a href="${esc(sourceUrl)}" target="_blank" rel="noopener"
+          style="font-size:10px;font-weight:normal;background:#FF9900;color:#fff;
+                 padding:1px 6px;border-radius:3px;margin-left:6px;text-decoration:none;">Amazon</a>`;
+      }
+      return '';
+    }
+
     function finish() {
       if (!container.isConnected) return;
       const valid = results.filter(r => r.product);
-      lastProductData = valid[0]?.product || null;
+      // Prefer sheet data for auto-fill
+      lastProductData = valid.find(r => r.source === 'sheet')?.product || valid[0]?.product || null;
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
-      container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, error }) => {
+      container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error }) => {
         if (!product) {
-          const msg = error || `${esc(asin)} not found in product sheet.`;
+          const msg = error || `${esc(asin)} not found.`;
           return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">⚠️ ${esc(msg)}</div>`;
         }
         const label = asins.length > 1 ? esc(asin) : 'Product Info';
         return `
           <div class="sp-block" style="margin-top:0;">
             <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
-              ${label}
+              ${label}${sourceBadge_(source, sourceUrl)}
               <span class="sp-chevron">▾</span>
             </div>
             <div class="sp-block-body">
