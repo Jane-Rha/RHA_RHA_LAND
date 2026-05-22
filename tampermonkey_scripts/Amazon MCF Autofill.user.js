@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.5
+// @version      0.8.6
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -589,11 +589,6 @@ async function fetchOrderIdByEmail(email) {
       setById('katal-id-9', email);
     }
 
-    const skipUK = (countryRaw || '').trim().toLowerCase() === 'united kingdom';
-    if (country && !skipUK) {
-      setCountry(country);
-    }
-
     if (q) {
       setById('sku-search-input', q) || setById('katal-id-10', q);
       // Trigger ASIN search by pressing Enter on the inner input after a short settle
@@ -645,6 +640,13 @@ async function fetchOrderIdByEmail(email) {
       fillAll(d);
 
       if (d.q) autoSelectBestSku();
+
+      // Country must be set AFTER all other field events have settled.
+      // setById/setByLabel fire bubbling input+change events; the kat-dropdown
+      // closes itself when it sees events outside its boundary. Delay 800ms.
+      if (d.country && d.countryRaw?.toLowerCase() !== 'united kingdom') {
+        setTimeout(() => setCountry(d.country), 800);
+      }
 
       if (d.email) {
         markRowMcfByEmail(d.email);
