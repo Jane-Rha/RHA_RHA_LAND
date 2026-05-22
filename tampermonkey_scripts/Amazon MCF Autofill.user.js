@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.6
+// @version      0.8.7
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -137,27 +137,20 @@
 
     // Open the dropdown by clicking the header
     const header = sr.querySelector('.select-header, [part="dropdown-header"]');
-    if (header) header.click();
+    if (!header) { LOG('Country dropdown header not found'); return false; }
+    header.click();
 
-    // Poll until kat-option is VISIBLE (offsetParent !== null means the panel is open)
-    // The option element always exists in the shadow root even when the panel is closed,
-    // so checking existence alone is wrong — we must wait for it to become visible.
-    let attempts = 0;
-    const timer = setInterval(() => {
-      attempts++;
+    // kat-option has its own shadow root. Clicking kat-option itself does nothing;
+    // we must click .content-wrapper inside kat-option.shadowRoot to trigger selection.
+    setTimeout(() => {
       const opt = sr.querySelector(`kat-option[value="${upper}"]`);
-      if (opt && opt.offsetParent !== null) {
-        ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(evt =>
-          opt.dispatchEvent(new MouseEvent(evt, { bubbles: true, composed: true }))
-        );
-        clearInterval(timer);
-        LOG('Country set via kat-option click =', upper);
-        return;
-      }
-      if (attempts > 30) {
-        clearInterval(timer);
-        LOG('Could not find visible kat-option for', upper);
-      }
+      if (!opt) { LOG('No kat-option for', upper); return; }
+      const optSr = opt.shadowRoot;
+      if (!optSr) { LOG('kat-option has no shadow root for', upper); return; }
+      const wrapper = optSr.querySelector('.content-wrapper');
+      if (!wrapper) { LOG('No .content-wrapper in kat-option shadow for', upper); return; }
+      wrapper.click();
+      LOG('Country set via content-wrapper click =', upper);
     }, 100);
 
     return true;
@@ -641,9 +634,8 @@ async function fetchOrderIdByEmail(email) {
 
       if (d.q) autoSelectBestSku();
 
-      // Country must be set AFTER all other field events have settled.
-      // setById/setByLabel fire bubbling input+change events; the kat-dropdown
-      // closes itself when it sees events outside its boundary. Delay 800ms.
+      // Delay country selection until after field-fill events settle.
+      // kat-dropdown closes on outside events; 800ms clears all input/change bubbles.
       if (d.country && d.countryRaw?.toLowerCase() !== 'united kingdom') {
         setTimeout(() => setCountry(d.country), 800);
       }
