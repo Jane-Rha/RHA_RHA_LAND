@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.7.0
+// @version      1.8.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -35,6 +35,8 @@
     POINT_OF_PUR:  20016270875033,
     DEVICE:        360022185671,
     PRODUCT_NAME:  360022185891,
+    BRAND_DETAIL:  5495572594201,
+    PHOTO_EXIST:   26936618247577,
     TOTAL_ORDERS:  21714421937305,
     TOTAL_REFUNDS: 21745453864345,
     SPIGEN_REFUND: 21745465897369,
@@ -151,6 +153,39 @@
     return opts.find(o => o.name.trim().toLowerCase() === needle)?.value || null;
   }
 
+  // Map 대분류 value → Brand(상세) tagger tag, SP/CASE first
+  function brandFromDaebunryu(d) {
+    if (!d) return null;
+    if (d.includes('보호필름'))                  return 'spigen_sp_';
+    if (d === '휴대폰케이스')                    return 'spigen_case_';
+    if (d.includes('차량'))                     return 'spigen_new_biz_';
+    if (/래저|음향|워치|주변기기|거치대/.test(d)) return 'spigen_sda_';
+    return null;
+  }
+
+  // Fetch ticket comments; cb(true) if any customer comment has image/video attachment
+  function fetchTicketComments(ticketId, cb) {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: `https://spigenhelp.zendesk.com/api/v2/tickets/${ticketId}/comments.json?include=users`,
+      onload(res) {
+        if (res.status !== 200) return cb(false);
+        try {
+          const data     = JSON.parse(res.responseText);
+          const comments = data.comments || [];
+          const users    = data.users    || [];
+          const agentIds = new Set(users.filter(u => u.role !== 'end-user').map(u => u.id));
+          const hasPhoto = comments.some(c =>
+            !agentIds.has(c.author_id) &&
+            (c.attachments || []).some(a => /^(image|video)\//.test(a.content_type))
+          );
+          cb(hasPhoto);
+        } catch { cb(false); }
+      },
+      onerror() { cb(false); },
+    });
+  }
+
   // ── Auto-fill status helpers ─────────────────────────────────────────────
 
   function setFillStatus(panel, msg) {
@@ -203,7 +238,12 @@
     fillZdInput('ASIN',               asinValue);
     fillZdInput('문의SKU',            itemSku);
     fillZdInput('Customer Full Name', buyerName);
-    fillZdInput('Purchase Date',      purchaseDateDom);
+    // Fill date and close the calendar popup that React opens on focus
+    if (fillZdInput('Purchase Date', purchaseDateDom)) {
+      setTimeout(() => document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      ), 150);
+    }
     fillZdInput('Order Status',       o.OrderStatus   || '');
     fillZdInput('Order Total',        orderTotal);
     fillZdInput('Delivery Level',     o.ShipmentServiceLevelCategory || '');
@@ -224,16 +264,23 @@
     const pop = salesChannelToPOP(o.SalesChannel);
     if (pop)                                 af.push({ id: ZD.POINT_OF_PUR,  value: pop });
 
-    // 3. Fetch Device + Product Name options async, then PUT
+    // 3. Brand(상세) from 대분류 — sync, push before async ops
+    const brandTag = brandFromDaebunryu(p['대분류'] || '');
+    if (brandTag) af.push({ id: ZD.BRAND_DETAIL, value: brandTag });
+
+    // 4. Async: Device + Product Name options + comments (photo check) → then PUT
     const deviceLabel  = p['기종명'] || '';
     const productLabel = p['모델명']  || '';
 
-    let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0);
+    let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0) + 1; // +1 for comments
     function tryPut() { if (--remain <= 0) putZdTicket(ticketId, af, btn, panel); }
 
     if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = matchOptVal(opts, deviceLabel);  if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
     if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = matchOptVal(opts, productLabel); if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
-    if (!remain)      putZdTicket(ticketId, af, btn, panel);
+    fetchTicketComments(ticketId, hasPhoto => {
+      af.push({ id: ZD.PHOTO_EXIST, value: hasPhoto ? 'yes' : 'no' });
+      tryPut();
+    });
   }
 
   function putZdTicket(ticketId, af, btn, panel) {
