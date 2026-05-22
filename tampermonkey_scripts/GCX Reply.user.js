@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.8.0
+// @version      1.8.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -147,10 +147,35 @@
     });
   }
 
-  function matchOptVal(opts, label) {
-    if (!label) return null;
-    const needle = label.trim().toLowerCase();
-    return opts.find(o => o.name.trim().toLowerCase() === needle)?.value || null;
+  // Tokenize: lowercase, strip dots and special chars, split on whitespace
+  function tokenize_(s) {
+    return s.toLowerCase().replace(/\./g, '').replace(/[^a-z0-9가-힣]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  }
+
+  // Jaccard similarity between two token arrays (set-based)
+  function jaccard_(a, b) {
+    const sa = new Set(a), sb = new Set(b);
+    let inter = 0;
+    for (const t of sa) if (sb.has(t)) inter++;
+    const union = sa.size + sb.size - inter;
+    return union ? inter / union : 0;
+  }
+
+  // Find the dropdown option whose label best matches `label` (fuzzy, supports "/" variants).
+  // Returns option value or null if best score < 0.25.
+  function bestMatchOptVal(opts, label) {
+    if (!label || !opts.length) return null;
+    // Sheet values may list multiple model variants separated by '/'
+    const variants = label.split('/').map(v => tokenize_(v.trim())).filter(v => v.length);
+    let bestVal = null, bestScore = 0;
+    for (const o of opts) {
+      const oToks = tokenize_(o.name);
+      for (const vToks of variants) {
+        const score = jaccard_(oToks, vToks);
+        if (score > bestScore) { bestScore = score; bestVal = o.value; }
+      }
+    }
+    return bestScore >= 0.25 ? bestVal : null;
   }
 
   // Map 대분류 value → Brand(상세) tagger tag, SP/CASE first
@@ -275,8 +300,8 @@
     let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0) + 1; // +1 for comments
     function tryPut() { if (--remain <= 0) putZdTicket(ticketId, af, btn, panel); }
 
-    if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = matchOptVal(opts, deviceLabel);  if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
-    if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = matchOptVal(opts, productLabel); if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
+    if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = bestMatchOptVal(opts, deviceLabel);  if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
+    if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = bestMatchOptVal(opts, productLabel); if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
     fetchTicketComments(ticketId, hasPhoto => {
       af.push({ id: ZD.PHOTO_EXIST, value: hasPhoto ? 'yes' : 'no' });
       tryPut();
