@@ -1,10 +1,9 @@
   const SHEET_NAME = 'Defect';                              
   const CACHE_TTL_SECONDS = 60 * 60 * 6;
 
-  const GEMINI_MODELS = [                                                                         
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3-flash-preview',                                                                      
-    'gemini-3.1-pro-preview',                         
+  const GEMINI_MODELS = [
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite',
   ];
 
   function DR(inputText, category) {                                                              
@@ -16,8 +15,7 @@
       if (!inputText || !category) return '';
                                                                                                   
       // v17: invalidates all v16 cached empty results
-      const cacheKey = 'DR_v17_' + Utilities.base64Encode(inputText + '|' + category).slice(0,    
-  100);                                                                                           
+      const cacheKey = 'DR_v18_' + Utilities.base64Encode(inputText + '|' + category).slice(0, 100);                                                                                           
       const cache  = CacheService.getScriptCache();
       const cached = cache.get(cacheKey);                                                         
       if (cached !== null) return cached;  // only hit when a previous call SUCCEEDED             
