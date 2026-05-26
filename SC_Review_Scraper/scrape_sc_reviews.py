@@ -40,7 +40,7 @@ START_PAGE = 1
 # Page to start from. Set > 1 to resume a previously interrupted run.
 # When resuming, also set APPEND_CSV = True to avoid overwriting saved rows.
 
-APPEND_CSV = False
+APPEND_CSV = True
 # False — overwrites the CSV at the start (default, fresh run).
 # True  — appends to an existing CSV without rewriting the header.
 #          Use together with START_PAGE to resume an interrupted run.
@@ -845,7 +845,10 @@ async def main():
 
             # Always bring every tab to front so the user can verify the correct
             # marketplace is selected — even valid sessions may be on the wrong one.
-            await _p.bring_to_front()
+            try:
+                await _p.bring_to_front()
+            except Exception:
+                pass
             if _logged_in:
                 print(f"  [{_label}] Session valid — verify correct marketplace")
             else:

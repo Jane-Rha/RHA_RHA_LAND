@@ -8,7 +8,7 @@ const GCX_WEBHOOK    = 'https://chat.googleapis.com/v1/spaces/AAQAT2QdNVY/messag
 // ── All monitored projects ─────────────────────────────────────────────────────
 // endDate: null  →  permanent (bar shows full + "permanent" label, no expiry countdown)
 const TRIGGER_PROJECTS = [
-  { name: 'Apify Master',  endDate: '2026-05-08', time: '09:00 KST (Mon–Fri)' },
+  { name: 'Apify Master',  endDate: '2026-05-08', time: '04:00 KST (Mon–Fri)' },
   { name: '오전보고',      endDate: '2026-04-26', time: '09:00 KST (Mon–Fri)' },
   { name: 'TCT시트 보고',  endDate: '2026-04-26', time: '17:30 KST (Mon–Fri, Thu 15:30)' },
   { name: 'MCF Tracker',   endDate: null,          time: '09:00 KST (Mon–Fri, permanent)' },
@@ -139,7 +139,7 @@ function testSendTriggerStatus() {
 function createTriggers() {
   const endDate = new Date(MASTER_END_DATE + 'T23:59:59+09:00');
   let date = new Date();
-  date.setHours(9, 0, 0, 0); // 09:00 KST
+  date.setHours(4, 0, 0, 0); // 04:00 KST
 
   // Delete ALL existing masterDailyJob triggers in this project
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
