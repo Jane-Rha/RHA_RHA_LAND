@@ -4,6 +4,12 @@
 const SHEET_NAME = 'Defect';
 const CACHE_TTL_SECONDS = 60 * 60 * 6;
 
+const GEMINI_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite',
+];
+
 
 /**********************************************************
  * MAIN FUNCTION
@@ -16,7 +22,7 @@ function DR(inputText, category) {
     if (!inputText || !category) return '';
 
     const cacheKey =
-      'DR_v14_' +
+      'DR_v15_' +
       Utilities.base64Encode(inputText + '|' + category).slice(0, 100);
 
     const cache = CacheService.getScriptCache();
@@ -37,17 +43,9 @@ function DR(inputText, category) {
      ***********************/
     let output = '';
 
-    // flash attempt 1
-    output = callGeminiModel_(inputText, enrichedList, 'gemini-3.1-flash-preview');
-
-    // flash retry
-    if (!isValid_(output)) {
-      output = callGeminiModel_(inputText, enrichedList, 'gemini-3.1-flash-preview');
-    }
-
-    // fallback → flash-lite
-    if (!isValid_(output)) {
-      output = callGeminiModel_(inputText, enrichedList, 'gemini-3.1-flash-lite-preview');
+    for (const model of GEMINI_MODELS) {
+      output = callGeminiModel_(inputText, enrichedList, model);
+      if (isValid_(output)) break;
     }
 
     if (!isValid_(output)) return '';

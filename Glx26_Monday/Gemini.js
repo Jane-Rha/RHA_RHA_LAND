@@ -5,8 +5,9 @@ const SHEET_NAME = 'Defect';
 const CACHE_TTL_SECONDS = 60 * 60 * 6;
 
 const GEMINI_MODELS = [
+  'gemini-3.5-flash',
   'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite'
+  'gemini-3.1-flash-lite',
 ];
 
 
@@ -21,7 +22,7 @@ function DR(inputText, category) {
     if (!inputText || !category) return '';
 
     const cacheKey =
-      'DR_v20_' +
+      'DR_v21_' +
       Utilities.base64Encode(inputText + '|' + category).slice(0, 100);
 
     const cache = CacheService.getScriptCache();

@@ -15,7 +15,7 @@ function DR(inputText) {
 
     // cache version added (important)
     const cacheKey =
-      'DR_v2_' +
+      'DR_v3_' +
       Utilities.base64Encode(inputText).slice(0, 100);
 
     const cache = CacheService.getScriptCache();
@@ -118,7 +118,7 @@ ${inReasonListText}
 """${inputText}"""`;
 
   const url =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=' +
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' +
     apiKey;
 
   const payload = {

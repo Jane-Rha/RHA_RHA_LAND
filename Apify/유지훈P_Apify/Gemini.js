@@ -2,6 +2,7 @@
   const CACHE_TTL_SECONDS = 60 * 60 * 6;
 
   const GEMINI_MODELS = [
+    'gemini-3.5-flash',
     'gemini-3-flash-preview',
     'gemini-3.1-flash-lite',
   ];
@@ -15,7 +16,7 @@
       if (!inputText || !category) return '';
                                                                                                   
       // v17: invalidates all v16 cached empty results
-      const cacheKey = 'DR_v18_' + Utilities.base64Encode(inputText + '|' + category).slice(0, 100);                                                                                           
+      const cacheKey = 'DR_v19_' + Utilities.base64Encode(inputText + '|' + category).slice(0, 100);                                                                                           
       const cache  = CacheService.getScriptCache();
       const cached = cache.get(cacheKey);                                                         
       if (cached !== null) return cached;  // only hit when a previous call SUCCEEDED             
