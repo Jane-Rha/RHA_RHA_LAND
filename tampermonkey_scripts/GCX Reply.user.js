@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.1
+// @version      1.9.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -174,28 +174,41 @@
   }
 
   // Fetch amazon.XX/dp/{asin} HTML and parse product info; cb(product|null, pageUrl)
+  // Falls back through: order's marketplace → amazon.co.jp → amazon.com
   function fetchAmazonProduct_(asin, cb) {
-    const domain   = amazonDomain_(lastOrderData?.order?.SalesChannel, lastOrderData?.address?.CountryCode);
-    // Force English spec keys on non-US storefronts so our key names always match
-    const langParam = domain === 'amazon.com' ? '' : '?language=en_GB';
-    const url       = `https://www.${domain}/dp/${asin}${langParam}`;
-    GM_xmlhttpRequest({
-      method:   'GET',
-      url,
-      headers:  { 'Accept-Language': 'en-GB,en;q=0.9', 'Accept': 'text/html' },
-      redirect: 'follow',
-      timeout:  20000,
-      onload(res) {
-        if (res.status !== 200) return cb(null, url);
-        try {
-          const doc     = new DOMParser().parseFromString(res.responseText, 'text/html');
-          const product = parseAmazonPage_(doc);
-          cb(Object.values(product).some(v => v) ? product : null, url);
-        } catch { cb(null, url); }
-      },
-      onerror()   { cb(null, url); },
-      ontimeout() { cb(null, url); },
-    });
+    const primaryDomain = amazonDomain_(lastOrderData?.order?.SalesChannel, lastOrderData?.address?.CountryCode);
+    const primaryUrl    = `https://www.${primaryDomain}/dp/${asin}`;
+
+    const fallbacks = [primaryDomain];
+    if (!fallbacks.includes('amazon.co.jp')) fallbacks.push('amazon.co.jp');
+    if (!fallbacks.includes('amazon.com'))   fallbacks.push('amazon.com');
+
+    function tryDomain(idx) {
+      if (idx >= fallbacks.length) return cb(null, primaryUrl);
+      const domain    = fallbacks[idx];
+      const langParam = domain === 'amazon.com' ? '' : '?language=en_GB';
+      const url       = `https://www.${domain}/dp/${asin}${langParam}`;
+      GM_xmlhttpRequest({
+        method:   'GET',
+        url,
+        headers:  { 'Accept-Language': 'en-GB,en;q=0.9', 'Accept': 'text/html' },
+        redirect: 'follow',
+        timeout:  20000,
+        onload(res) {
+          if (res.status !== 200) return tryDomain(idx + 1);
+          try {
+            const doc     = new DOMParser().parseFromString(res.responseText, 'text/html');
+            const product = parseAmazonPage_(doc);
+            if (Object.values(product).some(v => v)) return cb(product, url);
+            tryDomain(idx + 1);
+          } catch { tryDomain(idx + 1); }
+        },
+        onerror()   { tryDomain(idx + 1); },
+        ontimeout() { tryDomain(idx + 1); },
+      });
+    }
+
+    tryDomain(0);
   }
 
   // Normalize label text: strip ★ * ( ) . and trim, lowercase
