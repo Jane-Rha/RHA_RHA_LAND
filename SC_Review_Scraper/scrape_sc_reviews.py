@@ -860,6 +860,8 @@ async def main():
         print(f"  Press Enter when ready, or wait {LOGIN_WAIT_SECONDS} s for auto-start.")
         if sys.stdin.isatty():
             await asyncio.get_event_loop().run_in_executor(None, input)
+        elif not needs_login:
+            print("\r  All sessions valid — starting immediately!    ")
         else:
             wait = LOGIN_WAIT_SECONDS
             print(f"  (non-interactive: starting in {wait} s)")
