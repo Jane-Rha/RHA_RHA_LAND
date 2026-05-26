@@ -15,7 +15,7 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["US", "EU", "JP", "IN"]
+DOMAINS = ["JP", "EU"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
@@ -113,7 +113,7 @@ CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # When "EU" is in DOMAINS, these sub-countries are scraped in order.
-EU_COUNTRIES = ["DE", "IT", "FR", "ES", "UK"]
+EU_COUNTRIES = ["IT", "FR", "ES", "UK"]
 # DE is scraped first (alone); IT, FR, ES, UK then scrape simultaneously in parallel.
 
 _DOMAINS = {
@@ -682,6 +682,7 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
         all_rows = []
 
     p = START_PAGE
+    _t_retries = 0  # retry counter for transient Playwright race-condition errors
     while p <= pages:
         url = dc["sc_base"] + params + (f"&pageNumber={p}" if p > 1 else "")
         print(f"  Page {p}/{pages} …", end=" ", flush=True)
@@ -689,6 +690,11 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_selector('.reviewContainer[data-testid]', timeout=15000)
         except Exception as e:
+            if "list.remove" in str(e) and _t_retries < 2:
+                _t_retries += 1
+                await asyncio.sleep(1)
+                continue  # retry same page
+            _t_retries = 0
             if "closed" in str(e).lower():
                 raise  # browser disconnected — abort this domain immediately
             cur_url = page.url
@@ -707,8 +713,17 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
             print(f"SKIP (timeout/error: {e})")
             p += 1
             continue
+        _t_retries = 0
         await simulate_reading(page, prof)
-        rows = await page.evaluate(extract_js)
+        try:
+            rows = await page.evaluate(extract_js)
+        except Exception as e:
+            if "list.remove" in str(e) and _t_retries < 2:
+                _t_retries += 1
+                await asyncio.sleep(1)
+                continue  # retry same page from goto
+            _t_retries = 0
+            raise
         di = IDX['Created 날짜']
         for row in rows:
             row[di] = _normalize_date(row[di])
