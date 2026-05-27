@@ -15,7 +15,7 @@ from playwright.async_api import async_playwright
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["JP", "EU"]
+DOMAINS = ["EU", "JP", "US", "IN"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
@@ -113,8 +113,8 @@ CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # When "EU" is in DOMAINS, these sub-countries are scraped in order.
-EU_COUNTRIES = ["IT", "FR", "ES", "UK"]
-# DE is scraped first (alone); IT, FR, ES, UK then scrape simultaneously in parallel.
+EU_COUNTRIES = ["DE", "IT", "FR", "ES", "UK"]
+# DE is scraped first (alone); IT, FR, ES, UK then follow sequentially.
 
 _DOMAINS = {
     "US": {
