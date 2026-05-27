@@ -176,7 +176,7 @@ ${inputText}
         temperature: 0,
         maxOutputTokens: 20,
         thinkingConfig: {
-          thinkingLevel: 'LOW'
+          thinkingBudget: 0
         }
       }
     };
