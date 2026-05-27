@@ -100,7 +100,7 @@
         contentType: 'application/json',                    
         payload: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 20 }                               
+          generationConfig: { temperature: 0, maxOutputTokens: 20, thinkingConfig: { thinkingBudget: 0 } }                               
         }),
         muteHttpExceptions: true                                                                  
       });                                                   

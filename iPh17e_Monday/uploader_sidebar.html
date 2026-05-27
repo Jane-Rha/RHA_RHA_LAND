@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <base target="_top" />
+    <style>
+      body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; padding: 12px; }
+      .row { display: flex; align-items: center; gap: 8px; }
+      .icon { width: 28px; height: 28px; }
+      button { padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; background: #0b57d0; color: #fff; cursor: pointer; }
+      button[disabled] { opacity: .6; cursor: default; }
+      input[type="date"], input[type="text"] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; }
+      .muted { color: #666; font-size: 12px; margin: 6px 0 10px; }
+      .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .log { margin-top: 10px; font-size: 12px; white-space: pre-wrap; background: #f7f7f7; border: 1px solid #eee; padding: 8px; border-radius: 6px; height: 160px; overflow: auto; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+      th, td { border: 1px solid #e5e5e5; padding: 6px 8px; text-align: left; }
+      th { background: #fafafa; }
+      .status { font-weight: 600; }
+      .pending { color: #555; }
+      .ok { color: #0b7f2a; }
+      .fail { color: #b00020; }
+      .progress { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; margin: 6px 0 8px; }
+      .bar { height: 100%; width: 0%; background: #0b57d0; transition: width .2s ease; }
+      .kpis { display: flex; gap: 10px; font-size: 12px; color: #444; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <img class="icon" src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTbSZO83zI-GPymbNskVUqKRBZCsy5rRFT8bA&s" alt="icon" />
+      <h3 style="margin:0">Upload to Monday.com</h3>
+    </div>
+
+    <p class="muted">Monday.com Board Communication Log</p>
+
+    <div class="row" style="gap:8px;margin:6px 0 10px">
+      <label class="muted" style="min-width:72px">Date:</label>
+      <input id="dateInput" type="date" />
+      <input id="dateText" type="text" placeholder="or type yyyy.mm.dd" style="width:160px" />
+    </div>
+
+    <div class="row" style="gap:8px;margin-bottom:8px">
+      <button id="planBtn" title="Prepare">
+        <span id="planText">Prepare</span>
+        <span id="planSpin" class="spinner" style="display:none"></span>
+      </button>
+
+      <button id="runBtn" title="Run upload" disabled>
+        <span id="btnText">Run upload</span>
+        <span id="btnSpin" class="spinner" style="display:none"></span>
+      </button>
+    </div>
+
+    <div id="summary" class="muted">Pick a date, then click Prepare.</div>
+
+    <div class="progress"><div id="progressBar" class="bar"></div></div>
+
+    <div class="kpis">
+      <div>Scanned: <span id="kScan">0</span></div>
+      <div>Matched: <span id="kMatch">0</span></div>
+      <div>Queued: <span id="kQueued">0</span></div>
+    </div>
+
+    <table id="tbl" style="display:none">
+      <thead>
+        <tr>
+          <th style="width:64px">Row</th>
+          <th>Item name</th>
+          <th style="width:180px">Status</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <div id="out" class="log"></div>
+
+    <script>
+      function log(msg) {
+        const el = document.getElementById('out');
+        el.textContent += (el.textContent ? '\n' : '') + msg;
+        el.scrollTop = el.scrollHeight;
+      }
+
+      function setBusy(btnId, busy) {
+        const btn = document.getElementById(btnId);
+        const txt = document.getElementById(btnId === 'runBtn' ? 'btnText' : 'planText');
+        const spin = document.getElementById(btnId === 'runBtn' ? 'btnSpin' : 'planSpin');
+
+        btn.disabled = busy;
+        txt.textContent = busy
+          ? (btnId === 'runBtn' ? 'Uploading…' : 'Preparing…')
+          : (btnId === 'runBtn' ? 'Run upload' : 'Prepare');
+        spin.style.display = busy ? 'inline-block' : 'none';
+      }
+
+      function gsr(fnName, ...args) {
+        return new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)[fnName](...args);
+        });
+      }
+
+      function toSheetDate(v) {
+        let s = String(v || '').trim();
+        if (!s) return '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.replace(/-/g, '.'); // from <input type="date">
+        s = s.replace(/년|월/g, '.').replace(/일/g, '');
+        s = s.replace(/[-/]/g, '.').replace(/\s+/g, '');
+        s = s.replace(/\.+/g, '.').replace(/^\./, '').replace(/\.$/, '');
+        const m = s.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})$/);
+        return m ? `${m[1]}.${m[2].padStart(2, '0')}.${m[3].padStart(2, '0')}` : '';
+      }
+
+      function getSelectedDate() {
+        const fromPicker = document.getElementById('dateInput').value;
+        const fromText = document.getElementById('dateText').value;
+        return toSheetDate(fromPicker || fromText);
+      }
+
+      function setProgress(pct) {
+        document.getElementById('progressBar').style.width = Math.max(0, Math.min(100, pct)) + '%';
+      }
+      function setKpi(id, val) {
+        document.getElementById(id).textContent = String(val);
+      }
+
+      function renderAppend(newItems, baseIndex) {
+        const tbl = document.getElementById('tbl');
+        const tbody = document.getElementById('tbody');
+        tbl.style.display = 'table';
+
+        newItems.forEach((it, j) => {
+          const idx = baseIndex + j;
+          const tr = document.createElement('tr');
+          tr.id = 'row-' + idx;
+
+          const tdRow = document.createElement('td');
+          tdRow.textContent = it.sheetRow;
+
+          const tdTitle = document.createElement('td');
+          tdTitle.textContent = it.item_name;
+
+          const tdStatus = document.createElement('td');
+          tdStatus.className = 'status pending';
+          tdStatus.textContent = 'Pending';
+
+          tr.appendChild(tdRow);
+          tr.appendChild(tdTitle);
+          tr.appendChild(tdStatus);
+          tbody.appendChild(tr);
+        });
+      }
+
+      function setStatus(index, cls, text) {
+        const tr = document.getElementById('row-' + index);
+        if (!tr) return;
+        const td = tr.children[2];
+        td.className = 'status ' + cls;
+        td.textContent = text;
+      }
+
+      let plan = [];
+
+      async function prepare() {
+        document.getElementById('runBtn').disabled = true;
+        document.getElementById('summary').textContent = 'Preparing…';
+        document.getElementById('tbody').innerHTML = '';
+        document.getElementById('tbl').style.display = 'none';
+        document.getElementById('out').textContent = '';
+        setKpi('kScan', 0);
+        setKpi('kMatch', 0);
+        setKpi('kQueued', 0);
+        setProgress(0);
+        plan = [];
+        setBusy('planBtn', true);
+        log('Starting plan (paged)…');
+
+        try {
+          const selDate = getSelectedDate();
+          const meta = await gsr('getPlanMeta', selDate);
+          const total = meta.totalDataRows;
+          const pageSize = meta.pageSize || 250;
+
+          if (!total) {
+            document.getElementById('summary').textContent = 'No data rows in sheet.';
+            setBusy('planBtn', false);
+            return;
+          }
+
+          log(`Target date: ${meta.targetDate}. Total data rows: ${total}. Scanning in pages of ${pageSize}…`);
+
+          let scanned = 0, matched = 0, queued = 0;
+          let nextStart = meta.dataRowStart;
+
+          while (nextStart && nextStart <= meta.lastRow) {
+            const page = await gsr('getPlanPage', selDate, nextStart, pageSize);
+            scanned += page.scanned || 0;
+            matched += page.matched || 0;
+
+            if (page.trace && page.trace.length) {
+              page.trace.forEach(t => log(t));
+            }
+            if (page.items && page.items.length) {
+              const startIdx = plan.length;
+              plan = plan.concat(page.items);
+              renderAppend(page.items, startIdx);
+              queued = plan.length;
+            }
+
+            setKpi('kScan', scanned);
+            setKpi('kMatch', matched);
+            setKpi('kQueued', queued);
+            const pct = total ? Math.round((Math.min(scanned, total) / total) * 100) : 0;
+            setProgress(pct);
+
+            if (!page.nextStartRow || page.nextStartRow <= nextStart) break;
+            nextStart = page.nextStartRow;
+
+            await new Promise(r => setTimeout(r, 90));
+          }
+
+          document.getElementById('summary').textContent =
+            `Prepared ${plan.length} row(s) for ${meta.targetDate}. Scanned ${scanned} / ${total}.`;
+          document.getElementById('runBtn').disabled = plan.length === 0;
+          log(`Plan complete. ${plan.length} queued.`);
+        } catch (e) {
+          log('Error while preparing: ' + (e && e.message ? e.message : e));
+          document.getElementById('summary').textContent = 'Prepare failed.';
+        } finally {
+          setBusy('planBtn', false);
+        }
+      }
+
+      async function runUpload() {
+        if (!plan.length) {
+          log('No plan to upload. Click Prepare first.');
+          return;
+        }
+
+        setBusy('runBtn', true);
+        log('Starting upload…');
+
+        let okCount = 0, failCount = 0;
+
+        for (let i = 0; i < plan.length; i++) {
+          const item = plan[i];
+          setStatus(i, 'pending', 'Uploading…');
+          try {
+            const res = await gsr('uploadOnePlannedItem', item);
+            if (res && res.ok) {
+              okCount++;
+              setStatus(i, 'ok', 'Success');
+            } else {
+              failCount++;
+              const err = (res && res.error) ? res.error : 'Unknown error';
+              setStatus(i, 'fail', 'Failed');
+              log(`Row ${item.sheetRow} failed: ${err}`);
+            }
+          } catch (e) {
+            failCount++;
+            const err = e && e.message ? e.message : String(e);
+            setStatus(i, 'fail', 'Failed');
+            log(`Row ${item.sheetRow} failed: ${err}`);
+          }
+
+          setProgress(Math.round(((i + 1) / plan.length) * 100));
+          await new Promise(r => setTimeout(r, 60));
+        }
+
+        log(`Done. Success: ${okCount}, Failed: ${failCount}`);
+        setBusy('runBtn', false);
+      }
+
+      document.getElementById('planBtn').addEventListener('click', prepare);
+      document.getElementById('runBtn').addEventListener('click', runUpload);
+
+      (function setDefaultDate() {
+        const el = document.getElementById('dateInput');
+        if (!el) return;
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        el.value = `${yyyy}-${mm}-${dd}`;
+      })();
+    </script>
+  </body>
+</html>
