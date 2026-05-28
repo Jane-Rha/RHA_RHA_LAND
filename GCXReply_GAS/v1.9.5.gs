@@ -1,6 +1,3 @@
-// GCX Reply Tampermonkey Userscript — v1.9.5
-// Archive copy stored in GAS for reference. Do not execute in GAS context.
-/*
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
@@ -14,7 +11,7 @@
 // @connect      *
 // ==/UserScript==
 
-(function () {
+function gcxReplyUserscript() {
   'use strict';
 
   const GAS_URL    = 'https://script.google.com/macros/s/AKfycbw2Vdwk197LXB6oUAzuHS8sKamD5uqKZJDLvcHzbftWJk-M65XV1fAnTqiZo7ZEm4hk/exec';
@@ -1206,5 +1203,4 @@
   }
 
   setTimeout(init, 800);
-})();
-*/
+}
