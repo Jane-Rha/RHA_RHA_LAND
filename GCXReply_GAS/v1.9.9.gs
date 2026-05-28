@@ -11,7 +11,7 @@
 // @connect      *
 // ==/UserScript==
 
-(function () {
+function gcxReplyUserscript() {
   'use strict';
 
   const GAS_URL    = 'https://script.google.com/macros/s/AKfycbw2Vdwk197LXB6oUAzuHS8sKamD5uqKZJDLvcHzbftWJk-M65XV1fAnTqiZo7ZEm4hk/exec';
@@ -1239,4 +1239,4 @@
   }, 2000);
 
   setTimeout(init, 800);
-})();
+}
