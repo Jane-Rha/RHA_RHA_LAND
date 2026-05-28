@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.7
+// @version      1.9.8
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -558,7 +558,17 @@
   }
 
   // ── Styles ───────────────────────────────────────────────────────────────
-  GM_addStyle(`
+  // GM_addStyle may be undefined if Chrome MV3 restricts Tampermonkey grants;
+  // fall back to a plain <style> element so the UI still renders.
+  function safeAddStyle_(css) {
+    try { if (typeof GM_addStyle === 'function') { GM_addStyle(css); return; } } catch (_) {}
+    try {
+      const el = document.createElement('style');
+      el.textContent = css;
+      (document.head || document.documentElement || document.body).appendChild(el);
+    } catch (_) {}
+  }
+  safeAddStyle_(`
     #sp-order-panel {
       position: fixed;
       right: 16px;
