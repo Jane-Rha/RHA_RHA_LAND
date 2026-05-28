@@ -819,9 +819,14 @@
     if (!mkts || !mkts.length) {
       return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val" style="color:#aaa;">—</span></div>`;
     }
-    const badges = mkts.map(m =>
-      `<span style="display:inline-block;background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;">${esc(m)}</span>`
-    ).join('');
+    const SS_ID  = '172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA';
+    const badges = mkts.map(m => {
+      const name = typeof m === 'string' ? m : m.name;
+      const gid  = typeof m === 'string' ? null : m.gid;
+      const url  = `https://docs.google.com/spreadsheets/d/${SS_ID}/edit` + (gid != null ? `#gid=${gid}` : '');
+      return `<a href="${esc(url)}" target="_blank" rel="noopener"
+        style="display:inline-block;background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;text-decoration:none;">${esc(name)}</a>`;
+    }).join('');
     return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val">${badges}</span></div>`;
   }
 

@@ -303,7 +303,7 @@ function updateEuToken() {
 // A row is counted only if it contains the ASIN AND no cell contains '단종'.
 function checkMarketplaces_(asin) {
   const cache    = CacheService.getScriptCache();
-  const cacheKey = 'mkt_' + asin;
+  const cacheKey = 'mkt2_' + asin;
   const hit      = cache.get(cacheKey);
   if (hit) return JSON.parse(hit);
 
@@ -316,7 +316,7 @@ function checkMarketplaces_(asin) {
     for (const rowData of data) {
       const cells = rowData.map(c => String(c));
       if (cells.some(c => c === asin)) {
-        if (!cells.some(c => c.includes('단종'))) selling.push(sheetName);
+        if (!cells.some(c => c.includes('단종'))) selling.push({ name: sheetName, gid: sheet.getSheetId() });
         break;
       }
     }
