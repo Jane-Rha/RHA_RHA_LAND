@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.2
+// @version      1.9.3
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -462,23 +462,25 @@
             const data = JSON.parse(res.responseText);
             if (data.product) {
               // Found in Google Sheet
-              results[idx] = { asin, product: data.product, source: 'sheet' };
+              results[idx] = { asin, product: data.product, source: 'sheet', marketplaces: data.marketplaces || [] };
               done(idx);
             } else {
-              // Not in sheet → fall back to Amazon product page
+              // Not in sheet → fall back to Amazon product page (keep marketplaces from GAS)
+              const mkts = data.marketplaces || [];
               fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
                 results[idx] = {
                   asin,
-                  product:    amazonProduct,
-                  source:     amazonProduct ? 'amazon' : null,
-                  sourceUrl:  amazonUrl,
-                  error:      amazonProduct ? null : `${asin} not found in sheet or Amazon page.`,
+                  product:      amazonProduct,
+                  source:       amazonProduct ? 'amazon' : null,
+                  sourceUrl:    amazonUrl,
+                  marketplaces: mkts,
+                  error:        amazonProduct ? null : `${asin} not found in sheet or Amazon page.`,
                 };
                 done(idx);
               });
             }
           } catch (err) {
-            results[idx] = { asin, product: null, source: null, error: 'Parse error: ' + err.message };
+            results[idx] = { asin, product: null, source: null, marketplaces: [], error: 'Parse error: ' + err.message };
             done(idx);
           }
         },
@@ -510,7 +512,7 @@
       lastProductData = valid.find(r => r.source === 'sheet')?.product || valid[0]?.product || null;
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
-      container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error }) => {
+      container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
           const msg = error || `${esc(asin)} not found.`;
           return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">⚠️ ${esc(msg)}</div>`;
@@ -523,6 +525,7 @@
               <span class="sp-chevron">▾</span>
             </div>
             <div class="sp-block-body">
+              ${marketplacesRow_(marketplaces)}
               ${SHEET_COLS.map(col => row(col, product[col])).join('')}
             </div>
           </div>`;
@@ -809,6 +812,17 @@
       ? `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;font-weight:500;">${esc(text)}</a>`
       : `<span class="sp-val">${esc(text) || '—'}</span>`;
     return `<div class="sp-row"><span class="sp-label">${esc(label)}</span>${cell}</div>`;
+  }
+
+  // Render selling-marketplace badges from market spreadsheet check
+  function marketplacesRow_(mkts) {
+    if (!mkts || !mkts.length) {
+      return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val" style="color:#aaa;">—</span></div>`;
+    }
+    const badges = mkts.map(m =>
+      `<span style="display:inline-block;background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;">${esc(m)}</span>`
+    ).join('');
+    return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val">${badges}</span></div>`;
   }
 
   // ── Render order data ─────────────────────────────────────────────────────

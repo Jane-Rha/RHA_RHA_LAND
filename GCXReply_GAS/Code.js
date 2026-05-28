@@ -8,7 +8,9 @@
 
 const SHEET_ID    = '1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo';
 const SHEET_NAME  = 'Data';
-const PRODUCT_COLS = ['SKU','모델명','브랜드','제조사명','기종명','색상명','대분류','생산업체','원산지정보'];
+const PRODUCT_COLS  = ['SKU','모델명','브랜드','제조사명','기종명','색상명','대분류','생산업체','원산지정보'];
+const MARKET_SS_ID  = '172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA';
+const MARKET_SHEETS = ['DE', 'NL', 'SE', 'ES', 'UK', 'FR', 'IT', 'JP', 'IN', 'SG'];
 
 const REGIONS = [
   { endpoint: 'https://sellingpartnerapi-eu.amazon.com', region: 'eu-west-1', cred: 'main' },
@@ -70,11 +72,15 @@ function doGet(e) {
       // Auto-lookup ASIN from items if not passed explicitly
       const itemAsin = !asin && orderData.items && orderData.items[0]
         ? orderData.items[0].ASIN : null;
-      if (itemAsin) result.product = lookupAsin_(itemAsin);
+      if (itemAsin) {
+        result.product = lookupAsin_(itemAsin);
+        try { result.marketplaces = checkMarketplaces_(itemAsin); } catch { result.marketplaces = []; }
+      }
     }
 
     if (asin) {
       result.product = lookupAsin_(asin);
+      try { result.marketplaces = checkMarketplaces_(asin); } catch { result.marketplaces = []; }
     }
 
     return respond(result);
@@ -290,6 +296,34 @@ function updateEuToken() {
     'Atzr|IwEBIGcgTUaxMvFbotDXS95u_s_WdPkYbpaxAnk-k2rDILGYcikUgLb368CRqPYzBhr3hz_SPcfsOU2SUqP3UMIL7vhOzTD7E2Nm0MYHDivTzY4hHFNIXIxbYLRTrQ3qfi6ftpLh5dX0zlC-u5hQqeEXS-oyC1s8VffzWx4NJO7_Nex-BbrXVSNDWnkly0_sCqfzqMpBQ1cNHxHugFxcB4PxRi206mIlo5kE4vQplx_IIS4Q7R-OGzgpD4GRGaNnyTFYsywJKGb0o1MqUAAFYFOFnJhWyE5XbhzUnYr1plIaNV8Sjyq0Y_yc9LIe6eRzyzmMR6AwvR1VuLlWTdJKCFpeog-Z'
   );
   Logger.log('LWA_REFRESH_TOKEN updated');
+}
+
+// ── ASIN marketplace availability (market spreadsheet) ───────────────────────
+// Returns array of country codes (e.g. ['DE','UK']) where the ASIN is selling.
+// A row is counted only if it contains the ASIN AND no cell contains '단종'.
+function checkMarketplaces_(asin) {
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'mkt_' + asin;
+  const hit      = cache.get(cacheKey);
+  if (hit) return JSON.parse(hit);
+
+  const ss      = SpreadsheetApp.openById(MARKET_SS_ID);
+  const selling = [];
+  for (const sheetName of MARKET_SHEETS) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) continue;
+    const data = sheet.getDataRange().getValues();
+    for (const rowData of data) {
+      const cells = rowData.map(c => String(c));
+      if (cells.some(c => c === asin)) {
+        if (!cells.some(c => c.includes('단종'))) selling.push(sheetName);
+        break;
+      }
+    }
+  }
+
+  cache.put(cacheKey, JSON.stringify(selling), 3600);
+  return selling;
 }
 
 // ── Google Sheet ASIN lookup ──────────────────────────────────────────────────
