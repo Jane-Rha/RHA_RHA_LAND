@@ -301,9 +301,19 @@ function updateEuToken() {
 // ── ASIN marketplace availability (market spreadsheet) ───────────────────────
 // Returns array of country codes (e.g. ['DE','UK']) where the ASIN is selling.
 // A row is counted only if it contains the ASIN AND no cell contains '단종'.
+function colToLetter_(col) {
+  let letter = '';
+  for (let c = col + 1; c > 0; ) {
+    const rem = (c - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    c = Math.floor((c - 1) / 26);
+  }
+  return letter;
+}
+
 function checkMarketplaces_(asin) {
   const cache    = CacheService.getScriptCache();
-  const cacheKey = 'mkt2_' + asin;
+  const cacheKey = 'mkt3_' + asin;
   const hit      = cache.get(cacheKey);
   if (hit) return JSON.parse(hit);
 
@@ -313,10 +323,13 @@ function checkMarketplaces_(asin) {
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) continue;
     const data = sheet.getDataRange().getValues();
-    for (const rowData of data) {
-      const cells = rowData.map(c => String(c));
-      if (cells.some(c => c === asin)) {
-        if (!cells.some(c => c.includes('단종'))) selling.push({ name: sheetName, gid: sheet.getSheetId() });
+    for (let r = 0; r < data.length; r++) {
+      const cells  = data[r].map(c => String(c));
+      const colIdx = cells.findIndex(c => c === asin);
+      if (colIdx >= 0) {
+        if (!cells.some(c => c.includes('단종'))) {
+          selling.push({ name: sheetName, gid: sheet.getSheetId(), cell: colToLetter_(colIdx) + (r + 1) });
+        }
         break;
       }
     }

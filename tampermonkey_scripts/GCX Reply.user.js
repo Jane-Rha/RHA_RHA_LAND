@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.3
+// @version      1.9.4
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -823,7 +823,10 @@
     const badges = mkts.map(m => {
       const name = typeof m === 'string' ? m : m.name;
       const gid  = typeof m === 'string' ? null : m.gid;
-      const url  = `https://docs.google.com/spreadsheets/d/${SS_ID}/edit` + (gid != null ? `#gid=${gid}` : '');
+      const cell = typeof m === 'object' ? m.cell : null;
+      let url = `https://docs.google.com/spreadsheets/d/${SS_ID}/edit`;
+      if (gid != null) url += `#gid=${gid}`;
+      if (cell)        url += `&range=${cell}`;
       return `<a href="${esc(url)}" target="_blank" rel="noopener"
         style="display:inline-block;background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;text-decoration:none;">${esc(name)}</a>`;
     }).join('');
@@ -1033,6 +1036,12 @@
     if (ids.length === 0 && existingSet.size > 0) return;
 
     bar.innerHTML = '';
+    if (ids.length >= 2) {
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'font-size:11px;color:#888;width:100%;margin-bottom:3px;font-weight:500;';
+      lbl.textContent   = `주문 ID ${ids.length}개 발견 — 선택하세요:`;
+      bar.appendChild(lbl);
+    }
     ids.forEach(id => {
       const chip = document.createElement('span');
       chip.className    = 'sp-chip';
@@ -1053,7 +1062,7 @@
       } else if (ids.length === 0) {
         setStatus('No Amazon order ID found on this ticket. Paste one above.');
       } else {
-        setStatus('Multiple order IDs found — click a chip to look up.');
+        setStatus('');
       }
     }
   }
