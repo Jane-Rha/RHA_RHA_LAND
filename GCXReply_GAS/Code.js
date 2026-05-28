@@ -73,13 +73,17 @@ function doGet(e) {
       const itemAsin = !asin && orderData.items && orderData.items[0]
         ? orderData.items[0].ASIN : null;
       if (itemAsin) {
-        result.product = lookupAsin_(itemAsin);
+        const lu = lookupAsinAll_(itemAsin);
+        result.product = lu.product;
+        result.productSource = lu.productSource;
         try { result.marketplaces = checkMarketplaces_(itemAsin); } catch { result.marketplaces = []; }
       }
     }
 
     if (asin) {
-      result.product = lookupAsin_(asin);
+      const lu = lookupAsinAll_(asin);
+      result.product = lu.product;
+      result.productSource = lu.productSource;
       try { result.marketplaces = checkMarketplaces_(asin); } catch { result.marketplaces = []; }
     }
 
@@ -356,4 +360,69 @@ function lookupAsin_(asin) {
     if (i >= 0) result[col] = match[i] !== undefined ? String(match[i]) : '';
   });
   return result;
+}
+
+// ── Market spreadsheet — Data sheet ASIN lookup (source 2) ───────────────────
+function lookupAsin2_(asin) {
+  const sheet = SpreadsheetApp.openById(MARKET_SS_ID).getSheetByName('Data');
+  if (!sheet) return null;
+  const data    = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const asinIdx = headers.indexOf('ASIN');
+  if (asinIdx < 0) return null;
+
+  const match = data.slice(1).find(row => String(row[asinIdx]) === asin);
+  if (!match) return null;
+
+  const result = {};
+  PRODUCT_COLS.forEach(col => {
+    const i = headers.indexOf(col);
+    if (i >= 0) result[col] = match[i] !== undefined ? String(match[i]) : '';
+  });
+  return result;
+}
+
+// ── Market country sheets — partial lookup (col A = 기종명, col B = 모델명) ───
+// Returns a partial product object; other fields will be filled by Amazon page.
+function lookupAsinFromMarket_(asin) {
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'mkt_partial_' + asin;
+  const hit      = cache.get(cacheKey);
+  if (hit !== null) return hit === '__null__' ? null : JSON.parse(hit);
+
+  const ss = SpreadsheetApp.openById(MARKET_SS_ID);
+  for (const sheetName of MARKET_SHEETS) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) continue;
+    const data = sheet.getDataRange().getValues();
+    for (const rowData of data) {
+      const cells = rowData.map(c => String(c));
+      if (cells.some(c => c === asin)) {
+        const partial = {
+          'SKU': '', '모델명': String(rowData[1] || ''), '브랜드': '',
+          '제조사명': '', '기종명': String(rowData[0] || ''), '색상명': '',
+          '대분류': '', '생산업체': '', '원산지정보': '',
+        };
+        cache.put(cacheKey, JSON.stringify(partial), 3600);
+        return partial;
+      }
+    }
+  }
+
+  cache.put(cacheKey, '__null__', 3600);
+  return null;
+}
+
+// ── Full lookup chain: sheet1 → sheet2 Data → market country sheets ──────────
+function lookupAsinAll_(asin) {
+  let product = lookupAsin_(asin);
+  if (product) return { product, productSource: 'sheet1' };
+
+  product = lookupAsin2_(asin);
+  if (product) return { product, productSource: 'sheet2' };
+
+  product = lookupAsinFromMarket_(asin);
+  if (product) return { product, productSource: 'market' };
+
+  return { product: null, productSource: null };
 }

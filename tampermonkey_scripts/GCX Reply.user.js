@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.6
+// @version      1.9.7
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -462,13 +462,27 @@
         onload(res) {
           try {
             const data = JSON.parse(res.responseText);
-            if (data.product) {
-              // Found in Google Sheet
-              results[idx] = { asin, product: data.product, source: 'sheet', marketplaces: data.marketplaces || [] };
+            const mkts = data.marketplaces || [];
+            if (data.product && data.productSource !== 'market') {
+              // Full data from sheet1 or sheet2 — use directly
+              results[idx] = { asin, product: data.product, source: data.productSource || 'sheet', marketplaces: mkts };
               done(idx);
+            } else if (data.product && data.productSource === 'market') {
+              // Partial from country sheet (기종명 col A, 모델명 col B) — merge with Amazon
+              const partial = data.product;
+              fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
+                let merged = partial, src = 'market';
+                if (amazonProduct) {
+                  merged = Object.assign({}, amazonProduct);
+                  if (partial['기종명']) merged['기종명'] = partial['기종명'];
+                  if (partial['모델명']) merged['모델명'] = partial['모델명'];
+                  src = 'market+amazon';
+                }
+                results[idx] = { asin, product: merged, source: src, sourceUrl: amazonUrl, marketplaces: mkts };
+                done(idx);
+              });
             } else {
-              // Not in sheet → fall back to Amazon product page (keep marketplaces from GAS)
-              const mkts = data.marketplaces || [];
+              // Not in any sheet → fall back to Amazon product page
               fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
                 results[idx] = {
                   asin,
@@ -476,7 +490,7 @@
                   source:       amazonProduct ? 'amazon' : null,
                   sourceUrl:    amazonUrl,
                   marketplaces: mkts,
-                  error:        amazonProduct ? null : `${asin} not found in sheet or Amazon page.`,
+                  error:        amazonProduct ? null : `${asin} not found in any sheet or Amazon page.`,
                 };
                 done(idx);
               });
@@ -494,24 +508,28 @@
     });
 
     function sourceBadge_(source, sourceUrl) {
-      if (source === 'sheet') {
-        return `<a href="${esc(SHEET_URL)}" target="_blank" rel="noopener"
-          style="font-size:10px;font-weight:normal;background:#34a853;color:#fff;
-                 padding:1px 6px;border-radius:3px;margin-left:6px;text-decoration:none;">Sheet</a>`;
-      }
-      if (source === 'amazon') {
-        return `<a href="${esc(sourceUrl)}" target="_blank" rel="noopener"
-          style="font-size:10px;font-weight:normal;background:#FF9900;color:#fff;
-                 padding:1px 6px;border-radius:3px;margin-left:6px;text-decoration:none;">Amazon</a>`;
-      }
+      const MKTSS   = '172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA';
+      const sheet2Url = `https://docs.google.com/spreadsheets/d/${MKTSS}/edit?gid=583143689`;
+      const b = (href, label, bg) =>
+        `<a href="${esc(href || '#')}" target="_blank" rel="noopener"
+          style="font-size:10px;font-weight:normal;background:${bg};color:#fff;
+                 padding:1px 6px;border-radius:3px;margin-left:4px;text-decoration:none;">${label}</a>`;
+      if (source === 'sheet' || source === 'sheet1') return b(SHEET_URL, 'Sheet', '#34a853');
+      if (source === 'sheet2')                        return b(sheet2Url, 'Sheet', '#34a853');
+      if (source === 'market')                        return b(sheet2Url, 'Mkt',   '#e67e22');
+      if (source === 'market+amazon')                 return b(sheet2Url, 'Mkt', '#e67e22') + b(sourceUrl, 'Amazon', '#FF9900');
+      if (source === 'amazon')                        return b(sourceUrl, 'Amazon', '#FF9900');
       return '';
     }
 
     function finish() {
       if (!container.isConnected) return;
       const valid = results.filter(r => r.product);
-      // Prefer sheet data for auto-fill
-      lastProductData = valid.find(r => r.source === 'sheet')?.product || valid[0]?.product || null;
+      // Prefer sheet data for auto-fill (sheet1 > sheet2 > market+amazon > amazon > market)
+      lastProductData =
+        valid.find(r => r.source === 'sheet' || r.source === 'sheet1' || r.source === 'sheet2')?.product ||
+        valid.find(r => r.source === 'market+amazon')?.product ||
+        valid[0]?.product || null;
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
