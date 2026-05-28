@@ -1,3 +1,4 @@
+function gcxReplyUserscript() {
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
@@ -11,7 +12,7 @@
 // @connect      *
 // ==/UserScript==
 
-function gcxReplyUserscript() {
+(function () {
   'use strict';
 
   const GAS_URL    = 'https://script.google.com/macros/s/AKfycbw2Vdwk197LXB6oUAzuHS8sKamD5uqKZJDLvcHzbftWJk-M65XV1fAnTqiZo7ZEm4hk/exec';
@@ -1239,4 +1240,5 @@ function gcxReplyUserscript() {
   }, 2000);
 
   setTimeout(init, 800);
+})();
 }
