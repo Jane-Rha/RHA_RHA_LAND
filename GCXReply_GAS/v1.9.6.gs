@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.5
+// @version      1.9.6
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -1201,6 +1201,14 @@ function gcxReplyUserscript() {
 
     setTimeout(autoDetectAll, 2500);
   }
+
+  // Heartbeat: if both the panel AND the toggle button disappear from the DOM
+  // (Zendesk SPA re-render, slow initial load, etc.) re-run init automatically.
+  setInterval(() => {
+    if (!document.getElementById(PANEL_ID) && !document.getElementById('sp-toggle-btn')) {
+      init();
+    }
+  }, 5000);
 
   setTimeout(init, 800);
 }
