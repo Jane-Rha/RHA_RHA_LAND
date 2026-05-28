@@ -5,9 +5,9 @@ Edit the USER CONFIG section below, then run:
     python3 scrape_sc_reviews.py
 """
 
-import asyncio, csv, random, os, sys
+import asyncio, csv, random, os, sys, json
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 sys.stdout.reconfigure(line_buffering=True)  # flush every print immediately when running in background
 from playwright.async_api import async_playwright
 
@@ -75,6 +75,14 @@ FETCH_IMAGES_ONLY = False
 # True  — skip all scraping; just re-run the image fetch on existing CSV files.
 #         Use this to recover after a browser crash that interrupted the image fetch.
 #         DOMAINS and OUT_DIR must match the original run so the right CSVs are found.
+
+UPLOAD_TO_SHEETS = False
+# True  — after scraping, upload each domain CSV as a new sheet to SHEETS_SPREADSHEET_ID.
+#         Sheet names: {DOMAIN}_seller_central_reviews_{yymmdd} (KST date of the run).
+# False — skip upload (default).
+
+SHEETS_SPREADSHEET_ID = "1tMbA_msRfCRY0KK40GnyZ_h1uNCldlnk9Cg-_MTcbsw"
+# Target Google Spreadsheet for UPLOAD_TO_SHEETS. Credentials: ~/.config/gws_shim/token.json.
 
 LOGIN_WAIT_SECONDS = 300
 # Seconds to wait for manual login when running non-interactively (background / no TTY).
@@ -775,12 +783,97 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
     return len(all_rows), total_with_imgs
 
 
+def _upload_to_sheets(results, run_date):
+    """Upload each domain's CSV as a new worksheet to SHEETS_SPREADSHEET_ID."""
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        import gspread
+    except ImportError as e:
+        print(f"\n  SKIP sheets upload — missing library: {e}")
+        print("  Install with: pip install gspread google-auth")
+        return
+
+    token_path = os.path.expanduser("~/.config/gws_shim/token.json")
+    if not os.path.exists(token_path):
+        print(f"\n  SKIP sheets upload — credentials not found at {token_path}")
+        return
+
+    with open(token_path) as _f:
+        tok = json.load(_f)
+
+    creds = Credentials(
+        token=tok.get("token"),
+        refresh_token=tok.get("refresh_token"),
+        token_uri=tok.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=tok.get("client_id"),
+        client_secret=tok.get("client_secret"),
+        scopes=tok.get("scopes"),
+    )
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except Exception as e:
+            print(f"\n  SKIP sheets upload — token refresh failed: {e}")
+            return
+
+    try:
+        gc = gspread.authorize(creds)
+        spreadsheet = gc.open_by_key(SHEETS_SPREADSHEET_ID)
+    except Exception as e:
+        print(f"\n  SKIP sheets upload — cannot open spreadsheet: {e}")
+        return
+
+    print(f"\n{'═'*60}")
+    print(f"  Google Sheets upload  (run date: {run_date})")
+    print(f"{'═'*60}")
+
+    for domain, n_rows, n_imgs, status in results:
+        if status != "OK" or n_rows == 0:
+            print(f"  SKIP [{domain}] — {status}")
+            continue
+        csv_path = os.path.join(OUT_DIR, f"{domain}_seller_central_reviews.csv")
+        if not os.path.exists(csv_path):
+            print(f"  SKIP [{domain}] — CSV not found at {csv_path}")
+            continue
+
+        sheet_name = f"{domain}_seller_central_reviews_{run_date}"
+
+        with open(csv_path, encoding='utf-8-sig') as _f:
+            data = list(csv.reader(_f))
+
+        if not data:
+            print(f"  SKIP [{domain}] — CSV is empty")
+            continue
+
+        try:
+            existing = spreadsheet.worksheet(sheet_name)
+            spreadsheet.del_worksheet(existing)
+            print(f"  [{domain}] replaced existing sheet '{sheet_name}'")
+        except gspread.WorksheetNotFound:
+            pass
+
+        try:
+            ws = spreadsheet.add_worksheet(
+                title=sheet_name,
+                rows=max(len(data) + 1, 2),
+                cols=max(len(data[0]), 1) if data else 20,
+            )
+            ws.update(range_name='A1', values=data, value_input_option='RAW')
+            print(f"  ✓ [{domain}] → '{sheet_name}'  ({len(data) - 1} rows)")
+        except Exception as e:
+            print(f"  ✗ [{domain}] upload failed: {e}")
+
+
 async def main():
     if DETECTION_AVOIDANCE not in _PROFILES:
         raise ValueError("DETECTION_AVOIDANCE must be LOW, MEDIUM, or HIGH.")
     unknown = [d for d in DOMAINS if d not in _DOMAINS and d != "EU"]
     if unknown:
         raise ValueError(f"Unknown domain(s): {unknown}. Choose from: EU | {list(_DOMAINS)}")
+
+    KST = timezone(timedelta(hours=9))
+    run_date = datetime.now(KST).strftime("%y%m%d")
 
     prof = _PROFILES[DETECTION_AVOIDANCE]
 
@@ -970,6 +1063,9 @@ async def main():
     for domain, n_rows, n_imgs, status in results:
         print(f"  {domain:4s}  {n_rows:>5} reviews  {n_imgs:>4} with images  [{status}]")
     print(f"{'═'*60}")
+
+    if UPLOAD_TO_SHEETS:
+        _upload_to_sheets(results, run_date)
 
 
 if __name__ == '__main__':
