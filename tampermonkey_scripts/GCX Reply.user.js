@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.4
+// @version      1.9.5
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
@@ -265,14 +265,16 @@
   }
 
   // Find the dropdown option whose label best matches `label` (fuzzy, supports "/" variants).
+  // stripPrefix: strip brand/category prefix before the first "_" (e.g. "SP_", "CYRILL_", "(New Biz)_")
   // Returns option value or null if best score < 0.25.
-  function bestMatchOptVal(opts, label) {
+  function bestMatchOptVal(opts, label, stripPrefix) {
     if (!label || !opts.length) return null;
     // Sheet values may list multiple model variants separated by '/'
     const variants = label.split('/').map(v => tokenize_(v.trim())).filter(v => v.length);
     let bestVal = null, bestScore = 0;
     for (const o of opts) {
-      const oToks = tokenize_(o.name);
+      const name  = stripPrefix ? o.name.replace(/^[^_]+_/, '') : o.name;
+      const oToks = tokenize_(name);
       for (const vToks of variants) {
         const score = jaccard_(oToks, vToks);
         if (score > bestScore) { bestScore = score; bestVal = o.value; }
@@ -403,8 +405,8 @@
     let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0) + 1; // +1 for comments
     function tryPut() { if (--remain <= 0) putZdTicket(ticketId, af, btn, panel); }
 
-    if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = bestMatchOptVal(opts, deviceLabel);  if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
-    if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = bestMatchOptVal(opts, productLabel); if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
+    if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = bestMatchOptVal(opts, deviceLabel);        if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
+    if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = bestMatchOptVal(opts, productLabel, true); if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
     fetchTicketComments(ticketId, hasPhoto => {
       af.push({ id: ZD.PHOTO_EXIST, value: hasPhoto ? 'yes' : 'no' });
       tryPut();
