@@ -249,6 +249,24 @@ def _normalize_date(s):
     return s
 
 
+def _find_stale_row_ids(rows):
+    """Return set of Review IDs whose Reviewer+Title are identical to the immediately preceding row.
+
+    Different Review IDs sharing the same Reviewer AND Title in consecutive positions are
+    a signature of DOM recycling (a card's lazy-loaded content hasn't updated yet).
+    """
+    stale = set()
+    for i in range(1, len(rows)):
+        prev, cur = rows[i - 1], rows[i]
+        if (cur[IDX['Review ID']] != prev[IDX['Review ID']]
+                and cur[IDX['Reviewer']]
+                and cur[IDX['Reviewer']] == prev[IDX['Reviewer']]
+                and cur[IDX['Review Title']]
+                and cur[IDX['Review Title']] == prev[IDX['Review Title']]):
+            stale.add(cur[IDX['Review ID']])
+    return stale
+
+
 def _make_extract_js(domain_code, country):
     return f"""
 () => {{
@@ -309,9 +327,9 @@ def _make_extract_js(domain_code, country):
 
 SCROLL_JS = """
 () => new Promise(resolve => {
-  const maxScroll = document.body.scrollHeight * 0.75;
+  const maxScroll = document.body.scrollHeight;
   let pos = 0;
-  const cap = setTimeout(resolve, 5000);  // hard cap: always resolves within 5 s
+  const cap = setTimeout(resolve, 8000);  // hard cap: always resolves within 8 s
   const tick = () => {
     pos += Math.random() * 180 + 60;
     window.scrollTo(0, Math.min(pos, maxScroll));
@@ -320,6 +338,18 @@ SCROLL_JS = """
   };
   tick();
 })
+"""
+
+# Waits until every visible review card has loaded its reviewer text.
+# Guards against lazy-rendered cards that still show stale content from a recycled DOM slot.
+_CONTENT_READY_JS = """
+() => {
+    const cards = document.querySelectorAll('.reviewContainer[data-testid]');
+    if (!cards.length) return false;
+    return [...cards].every(c =>
+        (c.querySelector('.css-g7g1lz')?.textContent?.trim() || '').length > 0
+    );
+}
 """
 
 
@@ -723,6 +753,15 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
             continue
         _t_retries = 0
         await simulate_reading(page, prof)
+        # Wait for lazy-rendered card content to finish loading before extracting.
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        try:
+            await page.wait_for_function(_CONTENT_READY_JS, timeout=8000)
+        except Exception:
+            pass
         try:
             rows = await page.evaluate(extract_js)
         except Exception as e:
@@ -735,6 +774,37 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
         di = IDX['Created 날짜']
         for row in rows:
             row[di] = _normalize_date(row[di])
+        # Stale DOM detection: if any card's Reviewer+Title matches the previous card's
+        # (different IDs), the lazy sub-component hadn't rendered yet. Reload the page
+        # once with a longer wait and re-extract. Drop any rows still stale after retry.
+        stale_ids = _find_stale_row_ids(rows)
+        if stale_ids:
+            print(f"  ↻ {len(stale_ids)} stale rows on page {p} — reloading …", end=" ", flush=True)
+            await asyncio.sleep(random.uniform(1.0, 2.5))
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_selector('.reviewContainer[data-testid]', timeout=15000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                try:
+                    await page.wait_for_function(_CONTENT_READY_JS, timeout=10000)
+                except Exception:
+                    pass
+                retry_rows = await page.evaluate(extract_js)
+                for row in retry_rows:
+                    row[di] = _normalize_date(row[di])
+                rows = retry_rows
+                still_stale = _find_stale_row_ids(rows)
+                if still_stale:
+                    print(f"resolved {len(stale_ids) - len(still_stale)}, dropping {len(still_stale)} unfixable")
+                    rows = [r for r in rows if r[IDX['Review ID']] not in still_stale]
+                else:
+                    print(f"resolved all {len(stale_ids)}")
+            except Exception as _retry_err:
+                print(f"retry failed ({_retry_err}) — dropping {len(stale_ids)} stale rows")
+                rows = [r for r in rows if r[IDX['Review ID']] not in stale_ids]
         print(f"{len(rows)} reviews  →  flushed to CSV")
         all_rows.extend(rows)
         _csv_append_rows(out_file, rows)   # ← incremental write after every page
