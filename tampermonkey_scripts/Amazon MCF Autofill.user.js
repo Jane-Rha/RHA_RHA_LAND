@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.9
+// @version      0.9.0
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -190,10 +190,27 @@
     const t = tok.trim();
 
     if (/^UK$/i.test(t)) return 'GB';
-    if (/^United\s*Kingdom$/i.test(t)) return 'GB';
-    if (/^DEU?$/i.test(t) || /^Germany$/i.test(t) || /^Deutschland$/i.test(t)) return 'DE';
+    if (/^United\s*Kingdom$/i.test(t) || /^Grande.Bretagne$/i.test(t)) return 'GB';
+    if (/^DEU?$/i.test(t) || /^Germany$/i.test(t) || /^Deutschland$/i.test(t) || /^Allemagne$/i.test(t)) return 'DE';
     if (/^Espa/i.test(t) || /^Spain$/i.test(t)) return 'ES';
     if (/^Portugal/i.test(t)) return 'PT';
+    if (/^France$/i.test(t) || /^Francia$/i.test(t)) return 'FR';
+    if (/^Italy$/i.test(t) || /^Itali[ae]$/i.test(t) || /^Italie$/i.test(t)) return 'IT';
+    if (/^Netherlands$/i.test(t) || /^Holland$/i.test(t) || /^Pays.Bas$/i.test(t)) return 'NL';
+    if (/^Belgium$/i.test(t) || /^Belgique$/i.test(t) || /^Belgien$/i.test(t)) return 'BE';
+    if (/^Sweden$/i.test(t) || /^Su[eè]de$/i.test(t) || /^Sverige$/i.test(t)) return 'SE';
+    if (/^Poland$/i.test(t) || /^Pologne$/i.test(t) || /^Polen$/i.test(t)) return 'PL';
+    if (/^Austria$/i.test(t) || /^Autriche$/i.test(t) || /^[OÖ]sterreich$/i.test(t)) return 'AT';
+    if (/^Ireland$/i.test(t) || /^Irlande$/i.test(t) || /^Irland$/i.test(t)) return 'IE';
+    if (/^Denmark$/i.test(t) || /^Danemark$/i.test(t) || /^D[äa]nemark$/i.test(t)) return 'DK';
+    if (/^Finland$/i.test(t) || /^Finlande$/i.test(t) || /^Finnland$/i.test(t)) return 'FI';
+    if (/^Greece$/i.test(t) || /^Gr[eè]ce$/i.test(t) || /^Griechenland$/i.test(t)) return 'GR';
+    if (/^Romania$/i.test(t) || /^Roumanie$/i.test(t)) return 'RO';
+    if (/^Hungary$/i.test(t) || /^Hongrie$/i.test(t) || /^Ungarn$/i.test(t)) return 'HU';
+    if (/^Czech/i.test(t) || /^Tch[eè]quie$/i.test(t) || /^Tschechien$/i.test(t)) return 'CZ';
+    if (/^India$/i.test(t) || /^Inde$/i.test(t)) return 'IN';
+    if (/^Japan$/i.test(t) || /^Japon$/i.test(t) || /^日本$/.test(t)) return 'JP';
+    if (/^United\s*States$/i.test(t) || /^USA?$/i.test(t)) return 'US';
 
     return /^[A-Za-z]{2}$/.test(t) ? t.toUpperCase() : '';
   };
