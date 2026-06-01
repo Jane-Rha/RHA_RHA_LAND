@@ -230,7 +230,10 @@ function spApiPost_(endpoint, region, cred, path, body) {
 // ── Restricted Data Token for getOrderItems ───────────────────────────────────
 function getRdt_(endpoint, region, cred, orderId) {
   const r = spApiPost_(endpoint, region, cred, '/tokens/2021-03-01/restrictedDataToken', {
-    restrictedResources: [{ method: 'GET', path: `/orders/v0/orders/${orderId}/items` }],
+    restrictedResources: [
+      { method: 'GET', path: `/orders/v0/orders/${orderId}/items` },
+      { method: 'GET', path: `/orders/v0/orders/${orderId}/buyerInfo` },
+    ],
   });
   if (r.status !== 200) return { token: null, status: r.status, error: r.body };
   try {
@@ -280,9 +283,10 @@ function fetchOrderData_(orderId) {
     if (!order.AmazonOrderId) continue; // 200 but error body (wrong region) — try next
 
     const rdtResult = getRdt_(endpoint, region, cred, orderId);
-    const itemsR    = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/items`, rdtResult.token || undefined);
-    const addrR  = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/address`);
-    const buyerR = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/buyerInfo`);
+    const rdtToken  = rdtResult.token || undefined;
+    const itemsR    = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/items`,     rdtToken);
+    const addrR     = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/address`);
+    const buyerR    = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/buyerInfo`, rdtToken);
 
     const buyer = buyerR.status === 200 ? JSON.parse(buyerR.body).payload || {} : {};
     const stats = fetchBuyerPurchaseStats_(endpoint, region, cred, order.SalesChannel, buyer.BuyerEmail || null);
