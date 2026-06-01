@@ -387,6 +387,43 @@ function AMZTK_JP(orderId) {
   }
 }
 
+/**
+ * Clears CacheService entries for AMZTK / AMZTK_JP formulas.
+ * Run manually from the Apps Script editor (or add to a menu).
+ * Also clears LWA token cache so tokens are re-fetched immediately.
+ */
+function clearAmztkCache() {
+  var cache = CacheService.getScriptCache();
+
+  // Read all order IDs from the sheet to build exact cache keys.
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('MCF 발송 로그');
+  var keys  = ['LWA_TOKEN_EU', 'LWA_TOKEN_FE']; // always clear auth tokens too
+
+  if (sheet) {
+    var lastRow = sheet.getLastRow();
+    var startRow = 4; // BF_START_ROW
+    if (lastRow >= startRow) {
+      var orderIds = sheet.getRange(startRow, 17, lastRow - startRow + 1, 1).getValues(); // col Q
+      for (var i = 0; i < orderIds.length; i++) {
+        var id = String(orderIds[i][0] || '').trim();
+        if (id) {
+          keys.push('AMZTK_' + id);
+          keys.push('AMZTK_JP_' + id);
+        }
+      }
+    }
+  }
+
+  // CacheService.removeAll accepts up to 100 keys per call — batch if needed.
+  var BATCH = 100;
+  for (var start = 0; start < keys.length; start += BATCH) {
+    cache.removeAll(keys.slice(start, start + BATCH));
+  }
+
+  SpreadsheetApp.getUi().alert('Cache cleared for ' + (keys.length - 2) + ' order(s) + LWA tokens.');
+}
+
 
 /******************************************************
  *   MCF STOCK LOOKUP (FBA Inventory)
