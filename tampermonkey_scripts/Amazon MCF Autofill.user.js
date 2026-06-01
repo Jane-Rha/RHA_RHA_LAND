@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.1
+// @version      1.0.2
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -14,12 +14,29 @@
 // @match        https://sellercentral.amazon.fr/mcf/orders/create-order*
 // @match        https://sellercentral.amazon.it/mcf/orders/create-order*
 // @match        https://sellercentral.amazon.es/mcf/orders/create-order*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        none
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  // Capture hash at document-start before Amazon's SPA can clear it
+  const _INIT_HASH = (() => {
+    const h = location.hash;
+    if (h && h.includes('spigen_mcf=')) {
+      try { sessionStorage.setItem('_spigen_mcf_hash', h); } catch(e) {}
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return h;
+  })();
+
+  function waitForDOM(fn) {
+    if (document.body) { fn(); return; }
+    const t = setInterval(() => { if (document.body) { clearInterval(t); fn(); } }, 20);
+  }
+
+  waitForDOM(function () {
 
   const LOG = (...a) => console.log('[MCF Autofill]', ...a);
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -687,22 +704,35 @@ async function fetchOrderIdByEmail(email) {
   ui.querySelector('#mcf-clip').onclick = pasteFromClipboard;
 
   // ── URL 해시 브릿지: Zendesk GCX Reply → MCF 자동입력 ───────────────────
-  // 페이지 로드 즉시 해시 저장 (Amazon SPA가 덮어쓰기 전에)
-  const _MCF_INIT_HASH = location.hash;
+  function waitForKatForm(timeout) {
+    if (timeout === undefined) timeout = 15000;
+    return new Promise(function(resolve) {
+      const start = Date.now();
+      const timer = setInterval(function() {
+        const field = [...document.querySelectorAll('kat-input')].find(
+          k => (k.getAttribute('label') || '').toLowerCase().includes('full name')
+        );
+        if (field || Date.now() - start > timeout) { clearInterval(timer); resolve(!!field); }
+      }, 300);
+    });
+  }
 
   async function autoFillFromUrlHash() {
+    const hash = sessionStorage.getItem('_spigen_mcf_hash') || '';
+    sessionStorage.removeItem('_spigen_mcf_hash');
     try {
-      if (!_MCF_INIT_HASH || !_MCF_INIT_HASH.includes('spigen_mcf=')) return;
-      const encoded = _MCF_INIT_HASH.split('spigen_mcf=')[1];
+      if (!hash || !hash.includes('spigen_mcf=')) return;
+      const encoded = hash.split('spigen_mcf=')[1];
       if (!encoded) return;
-
-      // 해시 즉시 제거 (URL 노출 방지)
-      history.replaceState(null, '', location.pathname + location.search);
 
       const d = JSON.parse(decodeURIComponent(atob(encoded)));
       if (!d || d.region === 'JP') return;
 
-      msg('Zendesk에서 자동입력 중…');
+      msg('Zendesk에서 자동입력 중… (폼 대기)');
+      const ready = await waitForKatForm(15000);
+      if (!ready) { msg('폼 타임아웃'); return; }
+
+      msg('폼 준비됨 — 입력 중…');
       fillAll({ name:d.name, street:d.street, city:d.city, state:d.state,
                 postal:d.postal, phone:d.phone, email:d.email,
                 country:d.country, countryRaw:d.country, q:d.asin });
@@ -725,7 +755,8 @@ async function fetchOrderIdByEmail(email) {
     } catch(e) { LOG('autoFillFromUrlHash error', e); }
   }
 
-  setTimeout(autoFillFromUrlHash, 1500);
+  setTimeout(autoFillFromUrlHash, 500);
 
+  }); // end waitForDOM
 })();
 
