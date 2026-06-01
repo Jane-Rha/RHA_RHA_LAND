@@ -305,11 +305,7 @@ function _tracksWithFallbacks(orderId, endpoints) {
       if (tracks && tracks.length > 0) return tracks;
     } catch (err) {
       lastErr = err;
-      // EU Planning error: order exists but not yet shipped — no point trying FE for an EU order.
-      // Throw immediately so the caller caches '' and skips the wasted FE call.
-      if (_isEuPlanningError(err)) throw err;
-      // Continue to next endpoint on region mismatch (400) or unauthorized (403).
-      if (_isRetryableRegionMismatchError(err) || _isUnauthorizedError(err)) continue;
+      if (_isRetryableRegionMismatchError(err)) continue;
       throw err;
     }
   }
@@ -330,16 +326,6 @@ function _isNoOrderInfoError(err) {
   return msg.indexOf('SP-API error 400') >= 0 &&
          (msg.indexOf('"code":"InvalidInput"') >= 0 || msg.indexOf('InvalidInput') >= 0) &&
          (msg.indexOf('Unable to get order info') >= 0 || msg.indexOf('GetOrderByMerchantOrderIdRequest') >= 0);
-}
-
-// EU SP-API FBA Outbound returns 400 InvalidInput "Received 500 response" for orders
-// in "Planning" status (not yet shipped — no package/tracking assigned).
-// Treat as "no tracking yet" → blank cell, retry in 10 min.
-function _isEuPlanningError(err) {
-  var msg = (err && err.message) ? err.message : String(err);
-  return msg.indexOf('SP-API error 400') >= 0 &&
-         msg.indexOf('InvalidInput') >= 0 &&
-         msg.indexOf('Received 500 response') >= 0;
 }
 
 // Returns true for error strings written back to cells ("EU ERR: ...", "JP ERR: ...", "ERR: ...")
@@ -369,10 +355,7 @@ function AMZTK(orderId) {
     return tn;
 
   } catch (err) {
-    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) {
-      cache.put(key, '', 3600); // not yet shipped / not found — retry in 1 hr
-      return '';
-    }
+    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) return '';
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'EU ERR: ' + (err && err.message ? err.message : err);
   }
@@ -398,168 +381,10 @@ function AMZTK_JP(orderId) {
     return tn;
 
   } catch (err) {
-    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) {
-      cache.put(key, '', 3600); // not yet shipped / not found — retry in 1 hr
-      return '';
-    }
+    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) return '';
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'JP ERR: ' + (err && err.message ? err.message : err);
   }
-}
-
-/**
- * Debug: shows raw API response for AMZTK / AMZTK_JP on each endpoint.
- * Use in a cell: =AMZTKDebug(Q2331)  or  =AMZTKDebug(Q2331, B2331)
- * @customfunction
- * @param {string} orderId  The sellerFulfillmentOrderId (col Q)
- * @param {string} [region] Optional region from col B ("JP" = FE-first, else EU-first)
- * @return {Array} Table showing endpoint / status / trackingNumber / raw error
- */
-function AMZTKDebug(orderId, region) {
-  if (!orderId) return [['orderId required']];
-  var isJP = String(region || '').trim().toUpperCase() === 'JP';
-  var endpoints = isJP ? ['FE', 'EU'] : ['EU', 'FE'];
-  var rows = [['Endpoint', 'HTTP result', 'Shipments found', 'Packages found', 'TrackingNumber', 'Error']];
-
-  for (var i = 0; i < endpoints.length; i++) {
-    var ep = endpoints[i];
-    try {
-      var fo = getFulfillmentOrderRaw(String(orderId), ep);
-      var shipments = (fo && fo.fulfillmentShipments) || [];
-      var totalPkgs = 0, trackingNums = [];
-      shipments.forEach(function(sh) {
-        var pkgs = (sh.fulfillmentShipmentPackage && sh.fulfillmentShipmentPackage.length)
-          ? sh.fulfillmentShipmentPackage : (sh.packages || []);
-        totalPkgs += pkgs.length;
-        pkgs.forEach(function(p) {
-          var tn = p.trackingNumber || p.trackingId || p.amazonFulfillmentTrackingNumber || '';
-          if (tn) trackingNums.push(tn);
-        });
-      });
-      rows.push([ep, 'OK', shipments.length, totalPkgs, trackingNums.join(', ') || '(none)', '']);
-    } catch (err) {
-      var msg = (err && err.message) ? err.message : String(err);
-      rows.push([ep, 'ERR', '', '', '', msg.substring(0, 200)]);
-    }
-  }
-  return rows;
-}
-
-/**
- * Quick connection test — run from editor to check if LWA tokens + SP-API are working.
- * View → Logs after running.
- */
-function testSpApiConnection() {
-  ['EU', 'FE'].forEach(function(ep) {
-    try {
-      CacheService.getScriptCache().remove('LWA_TOKEN_' + (ep === 'FE' ? 'JP' : 'EU'));
-      var token = getLwaAccessToken(ep);
-      Logger.log(ep + ' LWA token OK: ' + token.substring(0, 30) + '...');
-    } catch (e) {
-      Logger.log(ep + ' LWA token FAILED: ' + e.message);
-    }
-  });
-
-  // Test getFulfillmentOrder (EU + FE) on the most recent Complete order
-  try {
-    var qs = 'QueryStartDate=' + encodeURIComponent(new Date(Date.now() - 30*24*3600*1000).toISOString());
-    var res = spapiFetchWithRetry('GET', '/fba/outbound/2020-07-01/fulfillmentOrders', { queryString: qs, endpoint: 'EU' }, 2, 3000);
-    var orders = ((res.payload || res).fulfillmentOrders) || [];
-    var complete = orders.filter(function(o) { return o.fulfillmentOrderStatus === 'Complete'; });
-    Logger.log('Complete orders in last 30 days: ' + complete.length + ' (of ' + orders.length + ' total)');
-
-    if (complete.length) {
-      var testId = complete[0].sellerFulfillmentOrderId;
-      var createdAt = complete[0].receivedDate || '?';
-      Logger.log('Test order: ' + testId + ' (created ' + createdAt + ')');
-
-      ['EU', 'FE'].forEach(function(ep) {
-        try {
-          var fo = getFulfillmentOrderRaw(testId, ep);
-          var shipments = (fo.fulfillmentShipments || []);
-          var tns = [];
-          shipments.forEach(function(sh) {
-            (sh.fulfillmentShipmentPackage || []).forEach(function(p) {
-              if (p.trackingNumber) tns.push(p.trackingNumber);
-            });
-          });
-          Logger.log(ep + ' getFulfillmentOrder → OK | shipments: ' + shipments.length + ' | tracking: ' + (tns.join(', ') || '(none yet)'));
-        } catch (e) {
-          Logger.log(ep + ' getFulfillmentOrder → FAILED: ' + e.message.substring(0, 200));
-        }
-      });
-    } else {
-      Logger.log('No Complete orders in last 30 days.');
-    }
-  } catch (e) {
-    Logger.log('listFulfillmentOrders FAILED: ' + e.message);
-  }
-}
-
-/**
- * Lists fulfillment orders SP-API actually knows about on the EU endpoint.
- * Run from Apps Script editor → Run → listRecentFulfillmentOrdersEU
- * Logs to Apps Script Logger (View → Logs).
- * Use this to confirm whether Seller Central-created MCF orders are visible to SP-API.
- */
-function listRecentFulfillmentOrdersEU() {
-  var queryDate = new Date();
-  queryDate.setDate(queryDate.getDate() - 30); // last 30 days
-  var qs = 'QueryStartDate=' + encodeURIComponent(queryDate.toISOString());
-
-  try {
-    var res = spapiFetchWithRetry('GET', '/fba/outbound/2020-07-01/fulfillmentOrders', { queryString: qs, endpoint: 'EU' }, 2, 3000);
-    var orders = ((res.payload || res).fulfillmentOrders) || [];
-    Logger.log('EU SP-API fulfillment orders in last 30 days: ' + orders.length);
-    orders.slice(0, 20).forEach(function(o) {
-      Logger.log(
-        'ID: ' + o.sellerFulfillmentOrderId +
-        ' | displayableId: ' + (o.displayableOrderId || '') +
-        ' | status: ' + (o.fulfillmentOrderStatus || '') +
-        ' | created: ' + (o.receivedDate || '')
-      );
-    });
-    if (!orders.length) Logger.log('>>> No orders found — MCF orders were NOT created via SP-API on EU endpoint.');
-  } catch (e) {
-    Logger.log('ERROR: ' + (e.message || e));
-  }
-}
-
-/**
- * Clears CacheService entries for AMZTK / AMZTK_JP formulas.
- * Run manually from the Apps Script editor (or add to a menu).
- * Also clears LWA token cache so tokens are re-fetched immediately.
- */
-function clearAmztkCache() {
-  var cache = CacheService.getScriptCache();
-
-  // Read all order IDs from the sheet to build exact cache keys.
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('MCF 발송 로그');
-  var keys  = ['LWA_TOKEN_EU', 'LWA_TOKEN_FE']; // always clear auth tokens too
-
-  if (sheet) {
-    var lastRow = sheet.getLastRow();
-    var startRow = 4; // BF_START_ROW
-    if (lastRow >= startRow) {
-      var orderIds = sheet.getRange(startRow, 17, lastRow - startRow + 1, 1).getValues(); // col Q
-      for (var i = 0; i < orderIds.length; i++) {
-        var id = String(orderIds[i][0] || '').trim();
-        if (id) {
-          keys.push('AMZTK_' + id);
-          keys.push('AMZTK_JP_' + id);
-        }
-      }
-    }
-  }
-
-  // CacheService.removeAll accepts up to 100 keys per call — batch if needed.
-  var BATCH = 100;
-  for (var start = 0; start < keys.length; start += BATCH) {
-    cache.removeAll(keys.slice(start, start + BATCH));
-  }
-
-  SpreadsheetApp.getUi().alert('Cache cleared for ' + (keys.length - 2) + ' order(s) + LWA tokens.');
 }
 
 
@@ -646,7 +471,7 @@ function MCFFee(method, orderId, sentDate) {
       return fee;
     } catch (err) {
       lastErr = err;
-      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) continue;
+      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err)) continue;
       if (_isUnauthorizedError(err)) { cache.put(key, '__EMPTY__', 21600); return ''; }
       if (_isRateLimit429(err))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
       throw err;
@@ -656,7 +481,6 @@ function MCFFee(method, orderId, sentDate) {
   if (lastErr) {
     if (_isUnauthorizedError(lastErr)) { cache.put(key, '__EMPTY__', 21600); return ''; }
     if (_isNoOrderInfoError(lastErr))  { cache.put(key, '__EMPTY__', 21600); return ''; }
-    if (_isEuPlanningError(lastErr))   { cache.put(key, '__EMPTY__', 600);   return ''; } // retry in 10 min
     if (_isRateLimit429(lastErr))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
     return 'ERR: ' + (lastErr.message || lastErr);
   }
@@ -695,7 +519,7 @@ function MCFFee_JP(method, orderId, sentDate) {
       return fee;
     } catch (err) {
       lastErr = err;
-      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) continue;
+      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err)) continue;
       if (_isUnauthorizedError(err)) { cache.put(key, '__EMPTY__', 21600); return ''; }
       if (_isRateLimit429(err))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
       throw err;
@@ -705,7 +529,6 @@ function MCFFee_JP(method, orderId, sentDate) {
   if (lastErr) {
     if (_isUnauthorizedError(lastErr)) { cache.put(key, '__EMPTY__', 21600); return ''; }
     if (_isNoOrderInfoError(lastErr))  { cache.put(key, '__EMPTY__', 21600); return ''; }
-    if (_isEuPlanningError(lastErr))   { cache.put(key, '__EMPTY__', 600);   return ''; } // retry in 10 min
     if (_isRateLimit429(lastErr))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
     return 'ERR: ' + (lastErr.message || lastErr);
   }
