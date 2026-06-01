@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.0.0
+// @version      1.9.19
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -513,7 +513,7 @@
     const container = document.getElementById('sp-product-result');
     if (!container) return;
     if (!asins.length) { container.innerHTML = ''; return; }
-    container.innerHTML = `<div style="font-size:12px;color:#8e8e8e;padding:6px 16px;text-align:center;">Loading product info…</div>`;
+    container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info…</div>`;
 
     let loaded = 0;
     const results = new Array(asins.length).fill(null);
@@ -579,13 +579,13 @@
       const sheet2Url = `https://docs.google.com/spreadsheets/d/${MKTSS}/edit?gid=583143689`;
       const b = (href, label, bg) =>
         `<a href="${esc(href || '#')}" target="_blank" rel="noopener"
-          style="font-size:10px;font-weight:600;background:${bg};color:#fff;
-                 padding:2px 7px;border-radius:10px;margin-left:5px;text-decoration:none;letter-spacing:0.3px;">${label}</a>`;
-      if (source === 'sheet' || source === 'sheet1') return b(SHEET_URL, 'Sheet', '#405DE6');
-      if (source === 'sheet2')                        return b(sheet2Url, 'Sheet', '#405DE6');
-      if (source === 'market')                        return b(sheet2Url, 'Mkt',   '#F77737');
-      if (source === 'market+amazon')                 return b(sheet2Url, 'Mkt', '#F77737') + b(sourceUrl, 'Amazon', '#E1306C');
-      if (source === 'amazon')                        return b(sourceUrl, 'Amazon', '#E1306C');
+          style="font-size:10px;font-weight:normal;background:${bg};color:#fff;
+                 padding:1px 6px;border-radius:3px;margin-left:4px;text-decoration:none;">${label}</a>`;
+      if (source === 'sheet' || source === 'sheet1') return b(SHEET_URL, 'Sheet', '#34a853');
+      if (source === 'sheet2')                        return b(sheet2Url, 'Sheet', '#34a853');
+      if (source === 'market')                        return b(sheet2Url, 'Mkt',   '#e67e22');
+      if (source === 'market+amazon')                 return b(sheet2Url, 'Mkt', '#e67e22') + b(sourceUrl, 'Amazon', '#FF9900');
+      if (source === 'amazon')                        return b(sourceUrl, 'Amazon', '#FF9900');
       return '';
     }
 
@@ -599,15 +599,15 @@
         valid[0]?.product || null;
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
-      container.innerHTML = `<div style="padding:0 0 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
+      container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
           const msg = error || `${esc(asin)} not found.`;
-          return `<div style="font-size:12px;color:${error ? '#E1306C' : '#8e8e8e'};padding:6px 16px;">⚠️ ${esc(msg)}</div>`;
+          return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">⚠️ ${esc(msg)}</div>`;
         }
         const label = asins.length > 1 ? esc(asin) : 'Product Info';
         return `
           <div class="sp-block" style="margin-top:0;">
-            <div class="sp-block-title" style="border-top:1px solid #efefef;">
+            <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
               ${label}${sourceBadge_(source, sourceUrl)}
               <span class="sp-chevron">▾</span>
             </div>
@@ -624,7 +624,7 @@
     }
   }
 
-  // ── Styles (Instagram) ───────────────────────────────────────────────────
+  // ── Styles ───────────────────────────────────────────────────────────────
   // GM_addStyle may be undefined if Chrome MV3 restricts Tampermonkey grants;
   // fall back to a plain <style> element so the UI still renders.
   function safeAddStyle_(css) {
@@ -640,87 +640,81 @@
       position: fixed;
       right: 16px;
       top: 56px;
-      width: 340px;
+      width: 330px;
       min-width: 200px;
       max-width: 700px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
       background: #fff;
-      border: 1px solid #dbdbdb;
-      border-radius: 16px;
-      box-shadow: 0 8px 32px rgba(0,0,0,.16);
+      border: 1px solid #d8dcde;
+      border-radius: 6px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.16);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-      font-size: 13px;
-      color: #262626;
+      font-size: 12.5px;
+      color: #1f1f1f;
       z-index: 99999;
     }
     #sp-order-panel * { box-sizing: border-box; }
 
     #sp-panel-header {
-      padding: 12px 16px;
-      background: linear-gradient(45deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #FD1D1D, #F56040, #F77737, #FCAF45, #FFDC80);
-      border-bottom: none;
-      border-radius: 16px 16px 0 0;
+      padding: 9px 12px;
+      background: #f3f4f5;
+      border-bottom: 1px solid #d8dcde;
+      border-radius: 6px 6px 0 0;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       cursor: move;
-      font-weight: 700;
-      font-size: 14px;
-      color: #fff;
+      font-weight: 600;
+      font-size: 13px;
       user-select: none;
-      letter-spacing: 0.3px;
-      text-shadow: 0 1px 2px rgba(0,0,0,.18);
     }
     #sp-minimize-btn {
       margin-left: auto;
       cursor: pointer;
-      opacity: .85;
+      opacity: .5;
       font-size: 18px;
       line-height: .7;
-      padding: 2px 7px 4px;
-      border-radius: 6px;
-      color: #fff;
+      padding: 2px 6px 4px;
+      border-radius: 3px;
     }
-    #sp-minimize-btn:hover { opacity: 1; background: rgba(255,255,255,.2); }
+    #sp-minimize-btn:hover { opacity: 1; background: #e3e5e7; }
     #sp-panel-close {
       cursor: pointer;
-      opacity: .85;
-      font-size: 16px;
+      opacity: .5;
+      font-size: 15px;
       line-height: 1;
-      padding: 2px 6px;
-      border-radius: 6px;
-      color: #fff;
+      padding: 2px 5px;
+      border-radius: 3px;
     }
-    #sp-panel-close:hover { opacity: 1; background: rgba(255,255,255,.2); }
+    #sp-panel-close:hover { opacity: 1; background: #e3e5e7; }
 
     #sp-order-panel.minimized #sp-panel-body,
     #sp-order-panel.minimized #sp-resize-handle { display: none; }
-    #sp-order-panel.minimized #sp-panel-header { border-radius: 16px; cursor: pointer; }
+    #sp-order-panel.minimized #sp-panel-header { border-radius: 6px; border-bottom: none; cursor: pointer; }
 
     #sp-resize-handle {
       position: absolute;
       bottom: 0;
       right: 0;
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
       cursor: se-resize;
-      opacity: .25;
+      opacity: .35;
       background: repeating-linear-gradient(
         -45deg,
-        #833AB4 0px, #833AB4 2px,
+        #999 0px, #999 2px,
         transparent 2px, transparent 5px
       );
     }
-    #sp-resize-handle:hover { opacity: .65; }
+    #sp-resize-handle:hover { opacity: .75; }
 
     #sp-panel-body {
-      padding: 12px 16px 10px;
+      padding: 10px 14px 8px;
       overflow-y: auto;
       flex: 1;
       min-height: 0;
-      background: #fff;
     }
 
     #sp-order-panel.sp-compact .sp-row { flex-direction: column; gap: 1px; }
@@ -729,116 +723,93 @@
 
     #sp-id-bar {
       display: flex;
-      gap: 7px;
+      gap: 6px;
       align-items: center;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     #sp-order-input {
       flex: 1;
-      border: none;
-      border-bottom: 1.5px solid #dbdbdb;
-      border-radius: 0;
-      padding: 6px 4px;
-      font-size: 12.5px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+      border: 1px solid #c8cacc;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: monospace;
       outline: none;
-      background: transparent;
-      color: #262626;
-      transition: border-bottom-color .2s;
     }
-    #sp-order-input:focus { border-bottom-color: #833AB4; }
-    #sp-order-input::placeholder { color: #c7c7c7; }
+    #sp-order-input:focus { border-color: #5ba4cf; box-shadow: 0 0 0 2px rgba(91,164,207,.2); }
     #sp-asin-input {
       flex: 1;
-      border: none;
-      border-bottom: 1.5px solid #dbdbdb;
-      border-radius: 0;
-      padding: 6px 4px;
-      font-size: 12.5px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+      border: 1px solid #c8cacc;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: monospace;
       outline: none;
-      background: transparent;
-      color: #262626;
-      transition: border-bottom-color .2s;
     }
-    #sp-asin-input:focus { border-bottom-color: #FCAF45; }
-    #sp-asin-input::placeholder { color: #c7c7c7; }
-
+    #sp-asin-input:focus { border-color: #f0a500; box-shadow: 0 0 0 2px rgba(240,165,0,.2); }
     #sp-lookup-btn {
-      background: linear-gradient(45deg, #833AB4, #C13584, #E1306C);
+      background: #5ba4cf;
       color: #fff;
       border: none;
-      border-radius: 8px;
-      padding: 6px 13px;
+      border-radius: 4px;
+      padding: 5px 10px;
       cursor: pointer;
       font-size: 12px;
-      font-weight: 600;
       white-space: nowrap;
-      transition: opacity .15s;
-      letter-spacing: 0.2px;
     }
-    #sp-lookup-btn:hover { opacity: .82; }
+    #sp-lookup-btn:hover { background: #4a8fba; }
     #sp-product-btn {
-      background: linear-gradient(45deg, #F56040, #F77737, #FCAF45);
+      background: #f0a500;
       color: #fff;
       border: none;
-      border-radius: 8px;
-      padding: 6px 13px;
+      border-radius: 4px;
+      padding: 5px 10px;
       cursor: pointer;
       font-size: 12px;
-      font-weight: 600;
       white-space: nowrap;
-      transition: opacity .15s;
-      letter-spacing: 0.2px;
     }
-    #sp-product-btn:hover { opacity: .82; }
+    #sp-product-btn:hover { background: #d99200; }
 
-    #sp-autofill-bar { margin-bottom: 10px; display: none; }
+    #sp-autofill-bar { margin-bottom: 8px; display: none; }
     #sp-autofill-btn {
-      background: linear-gradient(90deg, #405DE6, #833AB4, #C13584, #E1306C);
+      background: #27ae60;
       color: #fff;
       border: none;
-      border-radius: 8px;
-      padding: 9px 0;
+      border-radius: 4px;
+      padding: 5px 0;
       cursor: pointer;
-      font-size: 13px;
-      font-weight: 700;
+      font-size: 12px;
       width: 100%;
-      letter-spacing: 0.3px;
-      transition: opacity .15s;
     }
-    #sp-autofill-btn:hover:not(:disabled) { opacity: .84; }
-    #sp-autofill-btn:disabled { opacity: .4; cursor: default; }
+    #sp-autofill-btn:hover:not(:disabled) { background: #219a52; }
+    #sp-autofill-btn:disabled { background: #a8d5b5; cursor: default; }
     #sp-fill-status {
       display: none;
-      font-size: 11.5px;
-      color: #833AB4;
-      margin-top: 5px;
+      font-size: 11px;
+      color: #27ae60;
+      margin-top: 4px;
       text-align: center;
-      font-weight: 600;
     }
 
-    #sp-detected-ids { margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 5px; min-height: 0; }
+    #sp-detected-ids { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; }
     .sp-chip {
-      background: #fff;
-      border: none;
-      box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #C13584;
-      color: #262626;
-      border-radius: 20px;
-      padding: 3px 12px;
+      background: #e8f4fc;
+      border: 1px solid #5ba4cf;
+      color: #1a6490;
+      border-radius: 12px;
+      padding: 2px 10px;
       font-size: 11.5px;
       cursor: pointer;
-      font-family: -apple-system, BlinkMacSystemFont, monospace;
+      font-family: monospace;
       user-select: none;
-      transition: box-shadow .15s;
     }
-    .sp-chip:hover { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #405DE6; }
+    .sp-chip:hover { background: #c8e4f5; }
 
     #sp-status {
       text-align: center;
-      padding: 16px 8px;
-      color: #8e8e8e;
-      font-size: 12.5px;
+      padding: 14px 8px;
+      color: #888;
+      font-size: 12px;
     }
 
     .sp-block { margin-top: 4px; }
@@ -846,64 +817,58 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 0 5px;
-      font-weight: 700;
-      font-size: 13px;
-      color: #262626;
+      padding: 7px 0 4px;
+      font-weight: 600;
+      font-size: 12.5px;
+      color: #2f3941;
       cursor: pointer;
       user-select: none;
-      border-top: 1px solid #efefef;
-      letter-spacing: 0.1px;
+      border-top: 1px solid #e9ebec;
     }
-    .sp-block-title .sp-chevron { margin-left: auto; transition: transform .18s; color: #8e8e8e; }
+    .sp-block-title .sp-chevron { margin-left: auto; transition: transform .18s; color: #aaa; }
     .sp-block.collapsed .sp-block-title .sp-chevron { transform: rotate(-90deg); }
     .sp-block.collapsed .sp-block-body { display: none; }
 
     .sp-row {
       display: flex;
       align-items: flex-start;
-      padding: 5px 0;
-      gap: 8px;
+      padding: 4px 0;
+      gap: 6px;
     }
     .sp-row:nth-child(odd) {
-      background: #fafafa;
-      margin: 0 -16px;
-      padding: 5px 16px;
+      background: #f8f9fa;
+      margin: 0 -14px;
+      padding: 4px 14px;
     }
-    .sp-label { color: #8e8e8e; min-width: 128px; flex-shrink: 0; font-size: 12px; font-weight: 400; }
-    .sp-val   { color: #262626; font-weight: 500; word-break: break-all; font-size: 12.5px; }
-    .sp-val.link { color: #405DE6; text-decoration: underline; cursor: pointer; }
+    .sp-label { color: #5ba4cf; min-width: 128px; flex-shrink: 0; font-size: 12px; }
+    .sp-val   { color: #2f3941; font-weight: 500; word-break: break-all; font-size: 12px; }
+    .sp-val.link { color: #5ba4cf; text-decoration: underline; cursor: pointer; }
 
     .sp-items-title {
-      font-weight: 700;
-      font-size: 11px;
-      color: #8e8e8e;
-      padding: 7px 0 3px;
-      border-top: 1px solid #efefef;
+      font-weight: 600;
+      font-size: 11.5px;
+      color: #666;
+      padding: 6px 0 2px;
+      border-top: 1px solid #eee;
       margin-top: 2px;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
     }
 
     #sp-toggle-btn {
       position: fixed;
       right: 16px;
       top: 56px;
-      background: linear-gradient(45deg, #405DE6, #C13584, #F77737, #FFDC80);
+      background: #5ba4cf;
       color: #fff;
       border: none;
-      border-radius: 24px;
-      padding: 8px 18px;
-      font-size: 13px;
-      font-weight: 700;
+      border-radius: 20px;
+      padding: 6px 12px;
+      font-size: 12px;
       cursor: pointer;
       z-index: 99999;
-      box-shadow: 0 3px 14px rgba(193,53,132,.45);
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
       display: none;
-      letter-spacing: 0.3px;
-      transition: opacity .15s;
     }
-    #sp-toggle-btn:hover { opacity: .88; }
+    #sp-toggle-btn:hover { background: #4a8fba; }
   `);
 
   // ── Panel HTML ────────────────────────────────────────────────────────────
@@ -912,10 +877,9 @@
     d.id = PANEL_ID;
     d.innerHTML = `
       <div id="sp-panel-header">
-        <svg width="20" height="20" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-          <rect x="10" y="10" width="80" height="80" rx="22" ry="22" fill="none" stroke="#fff" stroke-width="7"/>
-          <circle cx="50" cy="50" r="20" fill="none" stroke="#fff" stroke-width="7"/>
-          <circle cx="74" cy="26" r="6" fill="#fff"/>
+        <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+          <text x="3" y="38" font-size="38" font-family="Georgia,serif" font-style="italic" fill="#FF9900">a</text>
+          <path d="M6 40 Q24 48 42 40" stroke="#FF9900" stroke-width="3" fill="none" stroke-linecap="round"/>
         </svg>
         GCX Reply
         <span id="sp-minimize-btn" title="Minimize">─</span>
@@ -926,7 +890,7 @@
           <input id="sp-order-input" type="text" placeholder="408-XXXXXXX-XXXXXXX" maxlength="19"/>
           <button id="sp-lookup-btn">Lookup</button>
         </div>
-        <div id="sp-id-bar" style="margin-bottom:12px;">
+        <div id="sp-id-bar" style="margin-bottom:10px;">
           <input id="sp-asin-input" type="text" placeholder="ASIN (B0XXXXXXXXX)" maxlength="10"/>
           <button id="sp-product-btn">Product</button>
         </div>
@@ -980,21 +944,21 @@
   function rowReturnAsin(asinStr, salesChannel, itemsStatus) {
     if (!asinStr || asinStr === '—') {
       const note = itemsStatus === 403
-        ? `<span style="font-size:10.5px;color:#F77737;margin-left:4px;">(GetOrderItems 권한 필요)</span>`
+        ? `<span style="font-size:10.5px;color:#e67e22;margin-left:4px;">(GetOrderItems 권한 필요)</span>`
         : '';
       return `<div class="sp-row"><span class="sp-label">Return ASIN</span><span class="sp-val">—${note}</span></div>`;
     }
     const ch = (salesChannel || 'amazon.com').toLowerCase();
     const links = asinStr.split(',').map(a => a.trim()).filter(Boolean).map(asin => {
       const url = `https://www.${ch}/dp/${asin}`;
-      return `<a href="${url}" target="_blank" rel="noopener" style="color:#405DE6;text-decoration:underline;">${esc(asin)}</a>`;
+      return `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;">${esc(asin)}</a>`;
     }).join(', ');
     return `<div class="sp-row"><span class="sp-label">Return ASIN</span><span class="sp-val">${links}</span></div>`;
   }
 
   function rowLinked(label, text, url) {
     const cell = url
-      ? `<a href="${url}" target="_blank" rel="noopener" style="color:#405DE6;text-decoration:underline;font-weight:600;">${esc(text)}</a>`
+      ? `<a href="${url}" target="_blank" rel="noopener" style="color:#5ba4cf;text-decoration:underline;font-weight:500;">${esc(text)}</a>`
       : `<span class="sp-val">${esc(text) || '—'}</span>`;
     return `<div class="sp-row"><span class="sp-label">${esc(label)}</span>${cell}</div>`;
   }
@@ -1002,7 +966,7 @@
   // Render selling-marketplace badges from market spreadsheet check
   function marketplacesRow_(mkts) {
     if (!mkts || !mkts.length) {
-      return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val" style="color:#8e8e8e;">—</span></div>`;
+      return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val" style="color:#aaa;">—</span></div>`;
     }
     const SS_ID  = '172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA';
     const badges = mkts.map(m => {
@@ -1013,7 +977,7 @@
       if (gid != null) url += `#gid=${gid}`;
       if (cell)        url += `&range=${cell}`;
       return `<a href="${esc(url)}" target="_blank" rel="noopener"
-        style="display:inline-block;background:linear-gradient(45deg,#405DE6,#833AB4,#E1306C);color:#fff;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;margin-right:3px;margin-bottom:3px;text-decoration:none;letter-spacing:0.3px;">${esc(name)}</a>`;
+        style="display:inline-block;background:#27ae60;color:#fff;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;text-decoration:none;">${esc(name)}</a>`;
     }).join('');
     return `<div class="sp-row"><span class="sp-label">판매 마켓</span><span class="sp-val">${badges}</span></div>`;
   }
@@ -1047,9 +1011,9 @@
     }).join('');
 
     const orderCountNote = data.totalPurchases != null
-      ? ` <span style="color:#8e8e8e;font-size:11px;font-weight:400;">(구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건)</span>`
+      ? ` <span style="color:#888;font-size:11px;">(구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건)</span>`
       : data.orderCount != null
-        ? ` <span style="color:#8e8e8e;font-size:11px;font-weight:400;">(총 ${data.orderCount}건)</span>`
+        ? ` <span style="color:#888;font-size:11px;">(총 ${data.orderCount}건)</span>`
         : '';
 
     return `
@@ -1058,8 +1022,8 @@
       <div class="sp-block">
         <div class="sp-block-title">
           <svg width="16" height="16" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-            <text x="3" y="38" font-size="38" font-family="Georgia,serif" font-style="italic" fill="#E1306C">a</text>
-            <path d="M6 40 Q24 47 42 40" stroke="#E1306C" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <text x="3" y="38" font-size="38" font-family="Georgia,serif" font-style="italic" fill="#FF9900">a</text>
+            <path d="M6 40 Q24 47 42 40" stroke="#FF9900" stroke-width="3" fill="none" stroke-linecap="round"/>
           </svg>
           Order${orderCountNote}
           <span class="sp-chevron">▾</span>
@@ -1241,7 +1205,7 @@
     bar.innerHTML = '';
     if (ids.length >= 2) {
       const lbl = document.createElement('div');
-      lbl.style.cssText = 'font-size:11px;color:#8e8e8e;width:100%;margin-bottom:4px;font-weight:500;';
+      lbl.style.cssText = 'font-size:11px;color:#888;width:100%;margin-bottom:3px;font-weight:500;';
       lbl.textContent   = `주문 ID ${ids.length}개 발견 — 선택하세요:`;
       bar.appendChild(lbl);
     }
@@ -1468,3 +1432,4 @@
 
   if (typeof setTimeout === 'function') setTimeout(init, 800);
 })();
+
