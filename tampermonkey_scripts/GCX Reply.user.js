@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.0.1
+// @version      2.1.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -377,6 +377,40 @@
   function maybeShowAutoFill(panel) {
     const bar = panel?.querySelector('#sp-autofill-bar');
     if (bar && lastOrderData) bar.style.display = 'block';
+    const mcfBar = panel?.querySelector('#sp-mcf-bar');
+    if (mcfBar && lastOrderData) mcfBar.style.display = 'block';
+  }
+
+  function sendToMCF(panel) {
+    if (!lastOrderData) return;
+    const o  = lastOrderData.order   || {};
+    const ad = lastOrderData.address || {};
+    const b  = lastOrderData.buyer   || {};
+    const itemAsins = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
+    const asin    = itemAsins[0] || panel.querySelector('#sp-asin-input')?.value.trim() || '';
+    const orderId = panel.querySelector('#sp-order-input')?.value.trim() || '';
+    const country = ad.CountryCode || '';
+    const payload = {
+      name:    b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '',
+      street:  ad.AddressLine1 || '',
+      city:    ad.City || '',
+      state:   ad.StateOrRegion || '',
+      postal:  ad.PostalCode || '',
+      phone:   ad.Phone || '',
+      email:   b.BuyerEmail || '',
+      country,
+      asin,
+      orderId,
+      region:  country === 'JP' ? 'JP' : 'global',
+      ts:      Date.now(),
+    };
+    localStorage.setItem('spigen_mcf_pending', JSON.stringify(payload));
+    const status = panel.querySelector('#sp-mcf-status');
+    if (status) {
+      status.textContent = '✓ MCF 페이지 열면 자동입력';
+      status.style.display = 'block';
+      setTimeout(() => { status.style.display = 'none'; }, 4000);
+    }
   }
 
   // ── Auto-fill: PUT all fields to Zendesk API, fill text fields in DOM ────
@@ -869,6 +903,26 @@
       display: none;
     }
     #sp-toggle-btn:hover { background: #4a8fba; }
+
+    #sp-mcf-bar { margin-bottom: 8px; display: none; }
+    #sp-mcf-btn {
+      background: #ff9900;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 0;
+      cursor: pointer;
+      font-size: 12px;
+      width: 100%;
+    }
+    #sp-mcf-btn:hover { background: #e68a00; }
+    #sp-mcf-status {
+      display: none;
+      font-size: 11px;
+      color: #27ae60;
+      margin-top: 4px;
+      text-align: center;
+    }
   `);
 
   // ── Panel HTML ────────────────────────────────────────────────────────────
@@ -898,6 +952,10 @@
         <div id="sp-autofill-bar">
           <button id="sp-autofill-btn">Auto-Fill Form</button>
           <div id="sp-fill-status"></div>
+        </div>
+        <div id="sp-mcf-bar">
+          <button id="sp-mcf-btn">→ MCF</button>
+          <div id="sp-mcf-status"></div>
         </div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
@@ -1354,6 +1412,7 @@
     asinInput.addEventListener('keydown', e => { if (e.key === 'Enter') panel.querySelector('#sp-product-btn').click(); });
 
     panel.querySelector('#sp-autofill-btn').onclick = () => autoFillTicket(panel);
+    panel.querySelector('#sp-mcf-btn').onclick = () => sendToMCF(panel);
 
     // ── Reset panel on ticket navigation ────────────────────────────────────
     function resetPanel() {
@@ -1369,6 +1428,8 @@
       if (chips) chips.innerHTML = '';
       const autoBar = panel.querySelector('#sp-autofill-bar');
       if (autoBar) autoBar.style.display = 'none';
+      const mcfBar = panel.querySelector('#sp-mcf-bar');
+      if (mcfBar) mcfBar.style.display = 'none';
       setFillStatus(panel, '');
     }
 
