@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.0
+// @version      1.0.1
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -686,15 +686,21 @@ async function fetchOrderIdByEmail(email) {
   // Bind UI button
   ui.querySelector('#mcf-clip').onclick = pasteFromClipboard;
 
-  // ── localStorage 브릿지: Zendesk GCX Reply → MCF 자동입력 ────────────────
-  async function autoFillFromStorage() {
+  // ── URL 해시 브릿지: Zendesk GCX Reply → MCF 자동입력 ───────────────────
+  // 페이지 로드 즉시 해시 저장 (Amazon SPA가 덮어쓰기 전에)
+  const _MCF_INIT_HASH = location.hash;
+
+  async function autoFillFromUrlHash() {
     try {
-      const raw = localStorage.getItem('spigen_mcf_pending');
-      if (!raw) return;
-      const d = JSON.parse(raw);
+      if (!_MCF_INIT_HASH || !_MCF_INIT_HASH.includes('spigen_mcf=')) return;
+      const encoded = _MCF_INIT_HASH.split('spigen_mcf=')[1];
+      if (!encoded) return;
+
+      // 해시 즉시 제거 (URL 노출 방지)
+      history.replaceState(null, '', location.pathname + location.search);
+
+      const d = JSON.parse(decodeURIComponent(atob(encoded)));
       if (!d || d.region === 'JP') return;
-      if (Date.now() - d.ts > 30 * 60 * 1000) { localStorage.removeItem('spigen_mcf_pending'); return; }
-      localStorage.removeItem('spigen_mcf_pending');
 
       msg('Zendesk에서 자동입력 중…');
       fillAll({ name:d.name, street:d.street, city:d.city, state:d.state,
@@ -716,10 +722,10 @@ async function fetchOrderIdByEmail(email) {
         msg('✓ Zendesk 자동입력 완료');
       }
       ensureExpeditedAfterReady();
-    } catch(e) { LOG('autoFillFromStorage error', e); }
+    } catch(e) { LOG('autoFillFromUrlHash error', e); }
   }
 
-  setTimeout(autoFillFromStorage, 1500);
+  setTimeout(autoFillFromUrlHash, 1500);
 
 })();
 
