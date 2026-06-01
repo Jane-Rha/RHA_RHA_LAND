@@ -428,6 +428,35 @@ function AMZTKDebug(orderId, region) {
 }
 
 /**
+ * Lists fulfillment orders SP-API actually knows about on the EU endpoint.
+ * Run from Apps Script editor → Run → listRecentFulfillmentOrdersEU
+ * Logs to Apps Script Logger (View → Logs).
+ * Use this to confirm whether Seller Central-created MCF orders are visible to SP-API.
+ */
+function listRecentFulfillmentOrdersEU() {
+  var queryDate = new Date();
+  queryDate.setDate(queryDate.getDate() - 30); // last 30 days
+  var qs = 'QueryStartDate=' + encodeURIComponent(queryDate.toISOString());
+
+  try {
+    var res = spapiFetchWithRetry('GET', '/fba/outbound/2020-07-01/fulfillmentOrders', { queryString: qs, endpoint: 'EU' }, 2, 3000);
+    var orders = ((res.payload || res).fulfillmentOrders) || [];
+    Logger.log('EU SP-API fulfillment orders in last 30 days: ' + orders.length);
+    orders.slice(0, 20).forEach(function(o) {
+      Logger.log(
+        'ID: ' + o.sellerFulfillmentOrderId +
+        ' | displayableId: ' + (o.displayableOrderId || '') +
+        ' | status: ' + (o.fulfillmentOrderStatus || '') +
+        ' | created: ' + (o.receivedDate || '')
+      );
+    });
+    if (!orders.length) Logger.log('>>> No orders found — MCF orders were NOT created via SP-API on EU endpoint.');
+  } catch (e) {
+    Logger.log('ERROR: ' + (e.message || e));
+  }
+}
+
+/**
  * Clears CacheService entries for AMZTK / AMZTK_JP formulas.
  * Run manually from the Apps Script editor (or add to a menu).
  * Also clears LWA token cache so tokens are re-fetched immediately.
