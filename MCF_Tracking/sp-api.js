@@ -444,6 +444,57 @@ function AMZTKDebug(orderId, region) {
 }
 
 /**
+ * Quick connection test — run from editor to check if LWA tokens + SP-API are working.
+ * View → Logs after running.
+ */
+function testSpApiConnection() {
+  ['EU', 'FE'].forEach(function(ep) {
+    try {
+      CacheService.getScriptCache().remove('LWA_TOKEN_' + (ep === 'FE' ? 'JP' : 'EU'));
+      var token = getLwaAccessToken(ep);
+      Logger.log(ep + ' LWA token OK: ' + token.substring(0, 30) + '...');
+    } catch (e) {
+      Logger.log(ep + ' LWA token FAILED: ' + e.message);
+    }
+  });
+
+  // Test getFulfillmentOrder (EU + FE) on the most recent Complete order
+  try {
+    var qs = 'QueryStartDate=' + encodeURIComponent(new Date(Date.now() - 30*24*3600*1000).toISOString());
+    var res = spapiFetchWithRetry('GET', '/fba/outbound/2020-07-01/fulfillmentOrders', { queryString: qs, endpoint: 'EU' }, 2, 3000);
+    var orders = ((res.payload || res).fulfillmentOrders) || [];
+    var complete = orders.filter(function(o) { return o.fulfillmentOrderStatus === 'Complete'; });
+    Logger.log('Complete orders in last 30 days: ' + complete.length + ' (of ' + orders.length + ' total)');
+
+    if (complete.length) {
+      var testId = complete[0].sellerFulfillmentOrderId;
+      var createdAt = complete[0].receivedDate || '?';
+      Logger.log('Test order: ' + testId + ' (created ' + createdAt + ')');
+
+      ['EU', 'FE'].forEach(function(ep) {
+        try {
+          var fo = getFulfillmentOrderRaw(testId, ep);
+          var shipments = (fo.fulfillmentShipments || []);
+          var tns = [];
+          shipments.forEach(function(sh) {
+            (sh.fulfillmentShipmentPackage || []).forEach(function(p) {
+              if (p.trackingNumber) tns.push(p.trackingNumber);
+            });
+          });
+          Logger.log(ep + ' getFulfillmentOrder → OK | shipments: ' + shipments.length + ' | tracking: ' + (tns.join(', ') || '(none yet)'));
+        } catch (e) {
+          Logger.log(ep + ' getFulfillmentOrder → FAILED: ' + e.message.substring(0, 200));
+        }
+      });
+    } else {
+      Logger.log('No Complete orders in last 30 days.');
+    }
+  } catch (e) {
+    Logger.log('listFulfillmentOrders FAILED: ' + e.message);
+  }
+}
+
+/**
  * Lists fulfillment orders SP-API actually knows about on the EU endpoint.
  * Run from Apps Script editor → Run → listRecentFulfillmentOrdersEU
  * Logs to Apps Script Logger (View → Logs).
