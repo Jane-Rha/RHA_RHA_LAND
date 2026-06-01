@@ -305,9 +305,11 @@ function _tracksWithFallbacks(orderId, endpoints) {
       if (tracks && tracks.length > 0) return tracks;
     } catch (err) {
       lastErr = err;
-      // Continue to next endpoint on region mismatch (400), unauthorized (403),
-      // or EU Planning-status 500-wrapped error — never abort on first endpoint alone.
-      if (_isRetryableRegionMismatchError(err) || _isUnauthorizedError(err) || _isEuPlanningError(err)) continue;
+      // EU Planning error: order exists but not yet shipped — no point trying FE for an EU order.
+      // Throw immediately so the caller caches '' and skips the wasted FE call.
+      if (_isEuPlanningError(err)) throw err;
+      // Continue to next endpoint on region mismatch (400) or unauthorized (403).
+      if (_isRetryableRegionMismatchError(err) || _isUnauthorizedError(err)) continue;
       throw err;
     }
   }
@@ -368,7 +370,7 @@ function AMZTK(orderId) {
 
   } catch (err) {
     if (_isUnauthorizedError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) {
-      cache.put(key, '', 600); // order exists but not yet shipped — retry in 10 min
+      cache.put(key, '', 3600); // not yet shipped / not found — retry in 1 hr
       return '';
     }
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
@@ -397,7 +399,7 @@ function AMZTK_JP(orderId) {
 
   } catch (err) {
     if (_isUnauthorizedError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) {
-      cache.put(key, '', 600); // order exists but not yet shipped — retry in 10 min
+      cache.put(key, '', 3600); // not yet shipped / not found — retry in 1 hr
       return '';
     }
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
