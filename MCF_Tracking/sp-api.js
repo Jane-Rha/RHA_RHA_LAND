@@ -305,9 +305,9 @@ function _tracksWithFallbacks(orderId, endpoints) {
       if (tracks && tracks.length > 0) return tracks;
     } catch (err) {
       lastErr = err;
-      // Continue to next endpoint on region mismatch (400) OR unauthorized (403) —
-      // a 403 on EU should still allow FE to be attempted, not abort immediately.
-      if (_isRetryableRegionMismatchError(err) || _isUnauthorizedError(err)) continue;
+      // Continue to next endpoint on region mismatch (400), unauthorized (403),
+      // or EU Planning-status 500-wrapped error — never abort on first endpoint alone.
+      if (_isRetryableRegionMismatchError(err) || _isUnauthorizedError(err) || _isEuPlanningError(err)) continue;
       throw err;
     }
   }
@@ -328,6 +328,16 @@ function _isNoOrderInfoError(err) {
   return msg.indexOf('SP-API error 400') >= 0 &&
          (msg.indexOf('"code":"InvalidInput"') >= 0 || msg.indexOf('InvalidInput') >= 0) &&
          (msg.indexOf('Unable to get order info') >= 0 || msg.indexOf('GetOrderByMerchantOrderIdRequest') >= 0);
+}
+
+// EU SP-API FBA Outbound returns 400 InvalidInput "Received 500 response" for orders
+// in "Planning" status (not yet shipped — no package/tracking assigned).
+// Treat as "no tracking yet" → blank cell, retry in 10 min.
+function _isEuPlanningError(err) {
+  var msg = (err && err.message) ? err.message : String(err);
+  return msg.indexOf('SP-API error 400') >= 0 &&
+         msg.indexOf('InvalidInput') >= 0 &&
+         msg.indexOf('Received 500 response') >= 0;
 }
 
 // Returns true for error strings written back to cells ("EU ERR: ...", "JP ERR: ...", "ERR: ...")
@@ -357,7 +367,10 @@ function AMZTK(orderId) {
     return tn;
 
   } catch (err) {
-    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) return '';
+    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) {
+      cache.put(key, '', 600); // order exists but not yet shipped — retry in 10 min
+      return '';
+    }
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'EU ERR: ' + (err && err.message ? err.message : err);
   }
@@ -383,7 +396,10 @@ function AMZTK_JP(orderId) {
     return tn;
 
   } catch (err) {
-    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) return '';
+    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) {
+      cache.put(key, '', 600); // order exists but not yet shipped — retry in 10 min
+      return '';
+    }
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'JP ERR: ' + (err && err.message ? err.message : err);
   }
@@ -577,7 +593,7 @@ function MCFFee(method, orderId, sentDate) {
       return fee;
     } catch (err) {
       lastErr = err;
-      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err)) continue;
+      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) continue;
       if (_isUnauthorizedError(err)) { cache.put(key, '__EMPTY__', 21600); return ''; }
       if (_isRateLimit429(err))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
       throw err;
@@ -587,6 +603,7 @@ function MCFFee(method, orderId, sentDate) {
   if (lastErr) {
     if (_isUnauthorizedError(lastErr)) { cache.put(key, '__EMPTY__', 21600); return ''; }
     if (_isNoOrderInfoError(lastErr))  { cache.put(key, '__EMPTY__', 21600); return ''; }
+    if (_isEuPlanningError(lastErr))   { cache.put(key, '__EMPTY__', 600);   return ''; } // retry in 10 min
     if (_isRateLimit429(lastErr))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
     return 'ERR: ' + (lastErr.message || lastErr);
   }
@@ -625,7 +642,7 @@ function MCFFee_JP(method, orderId, sentDate) {
       return fee;
     } catch (err) {
       lastErr = err;
-      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err)) continue;
+      if (_isRetryableRegionMismatchError(err) || _isNoOrderInfoError(err) || _isEuPlanningError(err)) continue;
       if (_isUnauthorizedError(err)) { cache.put(key, '__EMPTY__', 21600); return ''; }
       if (_isRateLimit429(err))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
       throw err;
@@ -635,6 +652,7 @@ function MCFFee_JP(method, orderId, sentDate) {
   if (lastErr) {
     if (_isUnauthorizedError(lastErr)) { cache.put(key, '__EMPTY__', 21600); return ''; }
     if (_isNoOrderInfoError(lastErr))  { cache.put(key, '__EMPTY__', 21600); return ''; }
+    if (_isEuPlanningError(lastErr))   { cache.put(key, '__EMPTY__', 600);   return ''; } // retry in 10 min
     if (_isRateLimit429(lastErr))      { cache.put(key, '__EMPTY__', 90);    return ''; } // retry after 90s
     return 'ERR: ' + (lastErr.message || lastErr);
   }
