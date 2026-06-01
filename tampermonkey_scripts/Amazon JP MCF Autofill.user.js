@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon JP MCF Autofill
-// @version      1.4.4
+// @version      1.5.0
 // @match        https://sellercentral-japan.amazon.com/mcf/orders/create-order/*
 // @run-at       document-idle
 // @grant        none
@@ -410,4 +410,24 @@
       navigator.clipboard.readText().then(t => t && fillJP(parseJP(t)));
     }
   });
+
+  // ── localStorage 브릿지: Zendesk GCX Reply → JP MCF 자동입력 ─────────────
+  async function autoFillFromStorageJP() {
+    try {
+      const raw = localStorage.getItem('spigen_mcf_pending');
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (!d || d.region !== 'JP') return;
+      if (Date.now() - d.ts > 30 * 60 * 1000) { localStorage.removeItem('spigen_mcf_pending'); return; }
+      localStorage.removeItem('spigen_mcf_pending');
+      LOG('Zendesk localStorage에서 자동입력 (JP)');
+      await fillJP({ postal:d.postal, stateJP:d.state, addr1:d.street,
+                     addr2:'', name:d.name, phone:d.phone, email:d.email, asin:d.asin });
+      if (d.orderId) await commitKat('katal-id-10', d.orderId);
+    } catch(e) { LOG('autoFillFromStorageJP error', e); }
+  }
+
+  setTimeout(autoFillFromStorageJP, 1500);
+
 })();
+
