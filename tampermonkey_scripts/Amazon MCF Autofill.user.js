@@ -1,6 +1,8 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.8.8
+// @version      0.8.9
+// @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
+// @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-eu.amazon.*/mcf/orders/create-order*
@@ -147,11 +149,12 @@
       attempts++;
       const opt = sr.querySelector(`kat-option[value="${upper}"]`);
       if (opt && opt.offsetParent !== null) {
-        ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(evt =>
-          opt.dispatchEvent(new MouseEvent(evt, { bubbles: true, composed: true }))
-        );
+        // kat-option ignores synthetic events dispatched on itself.
+        // Must click inside its own shadow root's .content-wrapper to trigger selection.
+        const inner = opt.shadowRoot && opt.shadowRoot.querySelector('.content-wrapper');
+        (inner || opt).click();
         clearInterval(timer);
-        LOG('Country set via kat-option click =', upper);
+        LOG('Country set via inner shadow click =', upper);
         return;
       }
       if (attempts > 30) {
