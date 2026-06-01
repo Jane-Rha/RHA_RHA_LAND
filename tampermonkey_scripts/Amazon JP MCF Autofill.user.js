@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon JP MCF Autofill
-// @version      1.5.0
+// @version      1.5.1
 // @match        https://sellercentral-japan.amazon.com/mcf/orders/create-order/*
 // @run-at       document-idle
 // @grant        none
@@ -411,23 +411,28 @@
     }
   });
 
-  // ── localStorage 브릿지: Zendesk GCX Reply → JP MCF 자동입력 ─────────────
-  async function autoFillFromStorageJP() {
+  // ── URL 해시 브릿지: Zendesk GCX Reply → JP MCF 자동입력 ────────────────
+  const _MCF_INIT_HASH = location.hash;
+
+  async function autoFillFromUrlHashJP() {
     try {
-      const raw = localStorage.getItem('spigen_mcf_pending');
-      if (!raw) return;
-      const d = JSON.parse(raw);
+      if (!_MCF_INIT_HASH || !_MCF_INIT_HASH.includes('spigen_mcf=')) return;
+      const encoded = _MCF_INIT_HASH.split('spigen_mcf=')[1];
+      if (!encoded) return;
+
+      history.replaceState(null, '', location.pathname + location.search);
+
+      const d = JSON.parse(decodeURIComponent(atob(encoded)));
       if (!d || d.region !== 'JP') return;
-      if (Date.now() - d.ts > 30 * 60 * 1000) { localStorage.removeItem('spigen_mcf_pending'); return; }
-      localStorage.removeItem('spigen_mcf_pending');
-      LOG('Zendesk localStorage에서 자동입력 (JP)');
+
+      LOG('Zendesk URL 해시에서 자동입력 (JP)');
       await fillJP({ postal:d.postal, stateJP:d.state, addr1:d.street,
                      addr2:'', name:d.name, phone:d.phone, email:d.email, asin:d.asin });
       if (d.orderId) await commitKat('katal-id-10', d.orderId);
-    } catch(e) { LOG('autoFillFromStorageJP error', e); }
+    } catch(e) { LOG('autoFillFromUrlHashJP error', e); }
   }
 
-  setTimeout(autoFillFromStorageJP, 1500);
+  setTimeout(autoFillFromUrlHashJP, 1500);
 
 })();
 
