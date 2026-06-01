@@ -292,7 +292,8 @@ function _isRetryableRegionMismatchError(err) {
     msg.indexOf('SP-API error 400') >= 0 &&
     (msg.indexOf('InvalidInput') >= 0 ||
      msg.indexOf('GetOrderByMerchantOrderIdRequest') >= 0 ||
-     msg.indexOf('Unable to get order info') >= 0)
+     msg.indexOf('Unable to get order info') >= 0 ||
+     msg.indexOf('Received 500 response') >= 0)  // EU FBA Outbound internal error
   );
 }
 
