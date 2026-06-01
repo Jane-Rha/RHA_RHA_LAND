@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      0.9.0
+// @version      1.0.0
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -686,4 +686,40 @@ async function fetchOrderIdByEmail(email) {
   // Bind UI button
   ui.querySelector('#mcf-clip').onclick = pasteFromClipboard;
 
+  // ── localStorage 브릿지: Zendesk GCX Reply → MCF 자동입력 ────────────────
+  async function autoFillFromStorage() {
+    try {
+      const raw = localStorage.getItem('spigen_mcf_pending');
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (!d || d.region === 'JP') return;
+      if (Date.now() - d.ts > 30 * 60 * 1000) { localStorage.removeItem('spigen_mcf_pending'); return; }
+      localStorage.removeItem('spigen_mcf_pending');
+
+      msg('Zendesk에서 자동입력 중…');
+      fillAll({ name:d.name, street:d.street, city:d.city, state:d.state,
+                postal:d.postal, phone:d.phone, email:d.email,
+                country:d.country, countryRaw:d.country, q:d.asin });
+
+      if (d.asin) autoSelectBestSku();
+      if (d.country) setTimeout(() => setCountry(d.country), 800);
+      if (d.email) markRowMcfByEmail(d.email);
+
+      if (d.orderId) {
+        setTimeout(() => { setOrderIdInput(d.orderId); msg('✓ Zendesk 자동입력 완료'); }, 1200);
+      } else if (d.email) {
+        msg('Order ID 조회 중…');
+        const order = await fetchOrderIdByEmail(d.email);
+        if (order) { setOrderIdInput(order); msg('✓ Zendesk 자동입력 완료'); }
+        else msg('✓ 자동입력 완료 (Order ID 없음)');
+      } else {
+        msg('✓ Zendesk 자동입력 완료');
+      }
+      ensureExpeditedAfterReady();
+    } catch(e) { LOG('autoFillFromStorage error', e); }
+  }
+
+  setTimeout(autoFillFromStorage, 1500);
+
 })();
+
