@@ -387,6 +387,90 @@ function AMZTK_JP(orderId) {
   }
 }
 
+/**
+ * Step-by-step AMZTK debug. Run from editor: set ORDER_ID below, then Run → debugAMZTK.
+ * Also clears the cache for that order so you see a live API result, not a cached blank.
+ * View → Logs after running.
+ */
+function debugAMZTK() {
+  var ORDER_ID = 'GCX-FR-260529-2323'; // ← change to the order you want to test
+
+  var cache = CacheService.getScriptCache();
+
+  // 1. Show what's currently in cache
+  var cachedEU = cache.get('AMZTK_' + ORDER_ID);
+  var cachedJP = cache.get('AMZTK_JP_' + ORDER_ID);
+  Logger.log('Cache AMZTK_'    + ORDER_ID + ' = ' + JSON.stringify(cachedEU) + ' (null = no entry)');
+  Logger.log('Cache AMZTK_JP_' + ORDER_ID + ' = ' + JSON.stringify(cachedJP));
+
+  // 2. Clear cache so we get a fresh API call
+  cache.removeAll(['AMZTK_' + ORDER_ID, 'AMZTK_JP_' + ORDER_ID]);
+  Logger.log('Cache cleared for ' + ORDER_ID);
+
+  // 3. Try EU endpoint directly
+  Logger.log('--- EU endpoint ---');
+  try {
+    var foEU = getFulfillmentOrderRaw(ORDER_ID, 'EU');
+    var shipmentsEU = (foEU && foEU.fulfillmentShipments) || [];
+    Logger.log('getFulfillmentOrderRaw EU: OK — ' + shipmentsEU.length + ' shipment(s)');
+    shipmentsEU.forEach(function(sh, i) {
+      var pkgs = (sh.fulfillmentShipmentPackage && sh.fulfillmentShipmentPackage.length)
+        ? sh.fulfillmentShipmentPackage : (sh.packages || []);
+      Logger.log('  Shipment ' + i + ': status=' + sh.fulfillmentShipmentStatus + ', ' + pkgs.length + ' package(s)');
+      pkgs.forEach(function(p, j) {
+        Logger.log('    Package ' + j + ': trackingNumber=' + (p.trackingNumber || '(empty)') +
+                   ', packageNumber=' + (p.packageNumber || '(none)'));
+      });
+    });
+    if (!shipmentsEU.length) Logger.log('  → fulfillmentShipments is EMPTY (order not yet shipped)');
+  } catch (e) {
+    Logger.log('getFulfillmentOrderRaw EU: ERROR — ' + e.message);
+  }
+
+  // 4. Try FE endpoint directly
+  Logger.log('--- FE endpoint ---');
+  try {
+    var foFE = getFulfillmentOrderRaw(ORDER_ID, 'FE');
+    var shipmentsFE = (foFE && foFE.fulfillmentShipments) || [];
+    Logger.log('getFulfillmentOrderRaw FE: OK — ' + shipmentsFE.length + ' shipment(s)');
+  } catch (e) {
+    Logger.log('getFulfillmentOrderRaw FE: ERROR — ' + e.message);
+  }
+
+  // 5. Call AMZTK() itself and show final return value
+  Logger.log('--- AMZTK() result ---');
+  var result = AMZTK(ORDER_ID);
+  Logger.log('AMZTK(' + ORDER_ID + ') returned: ' + JSON.stringify(result));
+  Logger.log('New cache value: ' + JSON.stringify(cache.get('AMZTK_' + ORDER_ID)));
+}
+
+/**
+ * Clears AMZTK cache for all orders in the sheet so cells re-fetch live.
+ * Run from editor after fixing any underlying issue.
+ */
+function clearAmztkCache() {
+  var cache = CacheService.getScriptCache();
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('MCF 발송 로그');
+  var keys  = ['LWA_TOKEN_EU', 'LWA_TOKEN_JP'];
+
+  if (sheet) {
+    var lastRow  = sheet.getLastRow();
+    var startRow = 4;
+    if (lastRow >= startRow) {
+      var orderIds = sheet.getRange(startRow, 17, lastRow - startRow + 1, 1).getValues();
+      for (var i = 0; i < orderIds.length; i++) {
+        var id = String(orderIds[i][0] || '').trim();
+        if (id) { keys.push('AMZTK_' + id); keys.push('AMZTK_JP_' + id); }
+      }
+    }
+  }
+
+  var BATCH = 100;
+  for (var s = 0; s < keys.length; s += BATCH) cache.removeAll(keys.slice(s, s + BATCH));
+  Logger.log('Cleared ' + (keys.length - 2) + ' order cache entries + LWA tokens.');
+}
+
 
 /******************************************************
  *   MCF STOCK LOOKUP (FBA Inventory)
