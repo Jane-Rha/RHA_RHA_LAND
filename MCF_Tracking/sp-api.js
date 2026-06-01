@@ -305,7 +305,9 @@ function _tracksWithFallbacks(orderId, endpoints) {
       if (tracks && tracks.length > 0) return tracks;
     } catch (err) {
       lastErr = err;
-      if (_isRetryableRegionMismatchError(err)) continue;
+      // Continue to next endpoint on region mismatch (400) OR unauthorized (403) —
+      // a 403 on EU should still allow FE to be attempted, not abort immediately.
+      if (_isRetryableRegionMismatchError(err) || _isUnauthorizedError(err)) continue;
       throw err;
     }
   }
@@ -385,6 +387,44 @@ function AMZTK_JP(orderId) {
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'JP ERR: ' + (err && err.message ? err.message : err);
   }
+}
+
+/**
+ * Debug: shows raw API response for AMZTK / AMZTK_JP on each endpoint.
+ * Use in a cell: =AMZTKDebug(Q2331)  or  =AMZTKDebug(Q2331, B2331)
+ * @customfunction
+ * @param {string} orderId  The sellerFulfillmentOrderId (col Q)
+ * @param {string} [region] Optional region from col B ("JP" = FE-first, else EU-first)
+ * @return {Array} Table showing endpoint / status / trackingNumber / raw error
+ */
+function AMZTKDebug(orderId, region) {
+  if (!orderId) return [['orderId required']];
+  var isJP = String(region || '').trim().toUpperCase() === 'JP';
+  var endpoints = isJP ? ['FE', 'EU'] : ['EU', 'FE'];
+  var rows = [['Endpoint', 'HTTP result', 'Shipments found', 'Packages found', 'TrackingNumber', 'Error']];
+
+  for (var i = 0; i < endpoints.length; i++) {
+    var ep = endpoints[i];
+    try {
+      var fo = getFulfillmentOrderRaw(String(orderId), ep);
+      var shipments = (fo && fo.fulfillmentShipments) || [];
+      var totalPkgs = 0, trackingNums = [];
+      shipments.forEach(function(sh) {
+        var pkgs = (sh.fulfillmentShipmentPackage && sh.fulfillmentShipmentPackage.length)
+          ? sh.fulfillmentShipmentPackage : (sh.packages || []);
+        totalPkgs += pkgs.length;
+        pkgs.forEach(function(p) {
+          var tn = p.trackingNumber || p.trackingId || p.amazonFulfillmentTrackingNumber || '';
+          if (tn) trackingNums.push(tn);
+        });
+      });
+      rows.push([ep, 'OK', shipments.length, totalPkgs, trackingNums.join(', ') || '(none)', '']);
+    } catch (err) {
+      var msg = (err && err.message) ? err.message : String(err);
+      rows.push([ep, 'ERR', '', '', '', msg.substring(0, 200)]);
+    }
+  }
+  return rows;
 }
 
 /**
