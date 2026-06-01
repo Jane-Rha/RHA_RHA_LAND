@@ -356,7 +356,10 @@ function AMZTK(orderId) {
     return tn;
 
   } catch (err) {
-    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) return '';
+    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) {
+      cache.put(key, '', 600); // no tracking yet — retry in 10 min
+      return '';
+    }
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'EU ERR: ' + (err && err.message ? err.message : err);
   }
@@ -382,7 +385,10 @@ function AMZTK_JP(orderId) {
     return tn;
 
   } catch (err) {
-    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) return '';
+    if (_isUnauthorizedError(err) || _isNoOrderInfoError(err)) {
+      cache.put(key, '', 600); // no tracking yet — retry in 10 min
+      return '';
+    }
     // 429 / transient errors: do NOT cache — let the next recalculation retry.
     return 'JP ERR: ' + (err && err.message ? err.message : err);
   }
