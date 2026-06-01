@@ -239,19 +239,35 @@ function getRdt_(endpoint, region, cred, orderId) {
   } catch { return { token: null, status: r.status, error: r.body }; }
 }
 
-// ── Buyer order count (capped at 50) ─────────────────────────────────────────
-function fetchBuyerOrders_(endpoint, region, cred, salesChannel, buyerEmail) {
+// ── Buyer purchase + refund stats (last 2 years, up to 500 orders) ───────────
+// Returns { totalPurchases, totalRefunds } where totalRefunds = Canceled orders.
+function fetchBuyerPurchaseStats_(endpoint, region, cred, salesChannel, buyerEmail) {
   const mpId = marketplaceId_(salesChannel);
   if (!mpId || !buyerEmail) return null;
-  const path = `/orders/v0/orders?MarketplaceIds=${encodeURIComponent(mpId)}&BuyerEmail=${encodeURIComponent(buyerEmail)}&MaxResultsPerPage=50`;
-  const r = spApiGet_(endpoint, region, cred, path);
-  if (r.status !== 200) return null;
-  try {
-    const d = JSON.parse(r.body);
-    const orders  = d.payload?.Orders || [];
-    const hasMore = !!d.payload?.NextToken;
-    return hasMore ? 50 : orders.length;
-  } catch { return null; }
+
+  const createdAfter = new Date(Date.now() - 2 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';
+  let totalPurchases = 0;
+  let totalRefunds   = 0;
+  let nextToken      = null;
+  let page           = 0;
+
+  do {
+    const path = nextToken
+      ? `/orders/v0/orders?NextToken=${encodeURIComponent(nextToken)}`
+      : `/orders/v0/orders?MarketplaceIds=${encodeURIComponent(mpId)}&BuyerEmail=${encodeURIComponent(buyerEmail)}&CreatedAfter=${encodeURIComponent(createdAfter)}&MaxResultsPerPage=100`;
+    const r = spApiGet_(endpoint, region, cred, path);
+    if (r.status !== 200) break;
+    try {
+      const d      = JSON.parse(r.body);
+      const orders = d.payload?.Orders || [];
+      totalPurchases += orders.length;
+      totalRefunds   += orders.filter(o => o.OrderStatus === 'Canceled').length;
+      nextToken       = d.payload?.NextToken || null;
+    } catch { break; }
+    page++;
+  } while (nextToken && page < 5);
+
+  return { totalPurchases, totalRefunds };
 }
 
 // ── Fetch order + items + address + buyer ─────────────────────────────────────
@@ -268,19 +284,21 @@ function fetchOrderData_(orderId) {
     const addrR  = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/address`);
     const buyerR = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}/buyerInfo`);
 
-    const buyer      = buyerR.status === 200 ? JSON.parse(buyerR.body).payload || {} : {};
-    const orderCount = fetchBuyerOrders_(endpoint, region, cred, order.SalesChannel, buyer.BuyerEmail || null);
+    const buyer = buyerR.status === 200 ? JSON.parse(buyerR.body).payload || {} : {};
+    const stats = fetchBuyerPurchaseStats_(endpoint, region, cred, order.SalesChannel, buyer.BuyerEmail || null);
 
     return {
       order,
-      items:       itemsR.status === 200 ? JSON.parse(itemsR.body).payload?.OrderItems || [] : [],
-      itemsStatus: itemsR.status,
-      itemsError:  itemsR.body,
-      rdtStatus:   rdtResult.status,
-      rdtError:    rdtResult.error,
-      address:     addrR.status  === 200 ? JSON.parse(addrR.body).payload?.ShippingAddress || {} : {},
+      items:          itemsR.status === 200 ? JSON.parse(itemsR.body).payload?.OrderItems || [] : [],
+      itemsStatus:    itemsR.status,
+      itemsError:     itemsR.body,
+      rdtStatus:      rdtResult.status,
+      rdtError:       rdtResult.error,
+      address:        addrR.status === 200 ? JSON.parse(addrR.body).payload?.ShippingAddress || {} : {},
       buyer,
-      orderCount,
+      orderCount:     stats ? stats.totalPurchases : null,
+      totalPurchases: stats ? stats.totalPurchases : null,
+      totalRefunds:   stats ? stats.totalRefunds   : null,
       region,
     };
   }

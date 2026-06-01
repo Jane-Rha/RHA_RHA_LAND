@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      1.9.18
+// @version      1.9.19
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -109,6 +109,17 @@
     const domain = salesChannel ? salesChannel.toLowerCase()
       : (countryCode ? (COUNTRY_SC[countryCode] || null) : null);
     return domain ? `https://sellercentral.${domain}/orders-v3/order/${orderId}` : null;
+  }
+
+  // Build Seller Central buyer order history search URL (last 2 years)
+  function sellerCentralSearchUrl_(salesChannel, countryCode, buyerEmail) {
+    if (!buyerEmail) return null;
+    const domain = salesChannel ? salesChannel.toLowerCase()
+      : (countryCode ? (COUNTRY_SC[countryCode] || null) : null);
+    if (!domain) return null;
+    const now         = Date.now();
+    const twoYearsAgo = Math.round(now - 2 * 365.25 * 24 * 3600 * 1000);
+    return `https://sellercentral.${domain}/orders-v3/search?qt=email&q=${encodeURIComponent(buyerEmail)}&date-range=${twoYearsAgo}-${now}`;
   }
 
   // Derive amazon.XX domain from order SalesChannel / CountryCode
@@ -390,9 +401,11 @@
     const asinValue  = itemAsins.length ? itemAsins.join(', ') : panelAsin;
     // SKU: prefer order items SellerSKU, fall back to product sheet
     const itemSku    = lastOrderData.items?.[0]?.SellerSKU || p.SKU || '';
-    // Order count → ✅전체 주문 dropdown
-    const orderCount    = lastOrderData.orderCount;
-    const orderCountVal = orderCount != null ? `q${Math.min(orderCount, 50)}` : null;
+    // Purchase / refund counts → ✅전체 주문 + ❎전체 환불 dropdowns (recent 2 years)
+    const totalPurchases = lastOrderData.totalPurchases ?? lastOrderData.orderCount;
+    const totalRefunds   = lastOrderData.totalRefunds;
+    const purchasesVal   = totalPurchases != null ? `q${Math.min(totalPurchases, 50)}` : null;
+    const refundsVal     = totalRefunds   != null ? `q${Math.min(totalRefunds,   50)}` : null;
     const buyerName    = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '';
     const orderTotal   = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '';
     const purchaseDateIso = o.PurchaseDate ? o.PurchaseDate.slice(0, 10) : '';
@@ -421,7 +434,8 @@
     if (orderId)                             af.push({ id: ZD.ORDER_ID,      value: orderId });
     if (asinValue)                           af.push({ id: ZD.ASIN,          value: asinValue });
     if (itemSku)                             af.push({ id: ZD.SKU,           value: itemSku });
-    if (orderCountVal)                       af.push({ id: ZD.TOTAL_ORDERS,  value: orderCountVal });
+    if (purchasesVal) af.push({ id: ZD.TOTAL_ORDERS,  value: purchasesVal });
+    if (refundsVal)   af.push({ id: ZD.TOTAL_REFUNDS, value: refundsVal });
     if (buyerName)                           af.push({ id: ZD.CUST_NAME,     value: buyerName });
     if (o.OrderStatus)                       af.push({ id: ZD.ORDER_STATUS,  value: o.OrderStatus });
     if (orderTotal)                          af.push({ id: ZD.ORDER_TOTAL,   value: orderTotal });
@@ -974,6 +988,8 @@
     const it = data.items   || [];
     const ad = data.address || {};
     const b  = data.buyer   || {};
+    const buyerEmail   = b.BuyerEmail || '';
+    const scSearchUrl  = sellerCentralSearchUrl_(o.SalesChannel, ad.CountryCode, buyerEmail);
 
     const itemAsins    = it.map(i => i.ASIN).filter(Boolean);
     const returnAsin   = itemAsins.length ? itemAsins.join(', ') : (panelAsin || '—');
@@ -994,8 +1010,11 @@
       return row(item.SellerSKU || item.ASIN, `${item.QuantityOrdered}×  ${title}`);
     }).join('');
 
-    const orderCountNote = data.orderCount != null
-      ? ` <span style="color:#888;font-size:11px;">(총 ${data.orderCount}건)</span>` : '';
+    const orderCountNote = data.totalPurchases != null
+      ? ` <span style="color:#888;font-size:11px;">(구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건)</span>`
+      : data.orderCount != null
+        ? ` <span style="color:#888;font-size:11px;">(총 ${data.orderCount}건)</span>`
+        : '';
 
     return `
       ${rowReturnAsin(returnAsin, o.SalesChannel, data.itemsStatus)}
@@ -1029,6 +1048,9 @@
           </div>
           ${row('Ship Service Level',  o.ShipServiceLevel)}
           ${row('Buyer Name',          buyerName)}
+          ${data.totalPurchases != null
+            ? rowLinked('Total Purchases', `구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건`, scSearchUrl)
+            : ''}
 
           ${it.length > 0 ? `<div class="sp-items-title">Items (${it.length})</div>${itemRows}` : ''}
         </div>
