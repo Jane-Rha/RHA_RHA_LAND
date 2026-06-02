@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.2
+// @version      1.0.3
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -645,12 +645,11 @@ async function fetchOrderIdByEmail(email) {
         const all = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g);
         if (!all || !all.length) return null;
 
-        // BLOCK all Zendesk subdomains + all internal emails
-        const blacklist =
-              /(spigen\.com|zendesk\.|amazon\.(com|co\.uk|de|fr|es|it|nl|se))/i;
-
-        // Prefer LAST customer email (deepest reply)
-        const user = [...all].reverse().find(e => !blacklist.test(e));
+        // Block internal/system emails; allow marketplace.amazon.* (anonymized buyer addresses)
+        const user = [...all].reverse().find(e =>
+          !/spigen\.com|zendesk\./i.test(e) &&
+          !(/amazon\.(com|co\.uk|de|fr|es|it|nl|se)/i.test(e) && !/marketplace\.amazon\./i.test(e))
+        );
         return user || null;
     }
 
