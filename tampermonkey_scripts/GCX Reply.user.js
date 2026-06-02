@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.0
+// @version      2.4.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -547,12 +547,12 @@
     renderAllProducts([asin]);
   }
 
-  function renderAllProducts(asins) {
+  function renderAllProducts(asins, _retry) {
     const container = document.getElementById('sp-product-result');
     if (!container) return;
     if (!asins.length) { container.innerHTML = ''; return; }
     container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info…</div>`;
-    logStep_(`⏳ GAS product lookup: ${asins.join(', ')}`);
+    if (!_retry) logStep_(`⏳ GAS product lookup: ${asins.join(', ')}`);
 
     let loaded = 0;
     const results = new Array(asins.length).fill(null);
@@ -566,6 +566,11 @@
         redirect: 'follow',
         timeout:  30000,
         onload(res) {
+          if (res.responseText.trimStart().startsWith('<')) {
+            results[idx] = { asin, product: null, source: null, marketplaces: [], error: '__html__', allSources: null };
+            done(idx);
+            return;
+          }
           try {
             const data = JSON.parse(res.responseText);
             const mkts = data.marketplaces || [];
@@ -638,6 +643,13 @@
 
     function finish() {
       if (!container.isConnected) return;
+      if (!_retry && results.every(r => r.error === '__html__')) {
+        logStep_('⚠️ GAS not ready, retrying product lookup…');
+        container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Retrying…</div>`;
+        setTimeout(() => renderAllProducts(asins, true), 2000);
+        return;
+      }
+      results.forEach(r => { if (r.error === '__html__') r.error = 'GAS error — refresh and try again'; });
       const valid = results.filter(r => r.product);
       // Prefer sheet data for auto-fill (sheet1 > sheet2 > market+amazon > amazon > market)
       lastProductData =
@@ -729,26 +741,36 @@
 
       // Sheet1
       const s1el = document.createElement('div');
-      const s1 = allSources?.sheet1;
-      if (s1) {
-        s1el.innerHTML = buildSourceBlock_('✓ Sheet1', SHEET1_LINK, s1);
-        logStep_(`✓ Source: Sheet1 found (${asin})`);
+      if (allSources === null) {
+        s1el.innerHTML = `<div style="font-size:11px;color:#c00;padding:2px 0;">⚠️ Sheet1 — fetch error</div>`;
+        logStep_(`⚠️ Source: Sheet1 fetch error (${asin})`);
       } else {
-        s1el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet1 — not found</div>`;
-        logStep_(`✗ Source: Sheet1 not found (${asin})`);
+        const s1 = allSources.sheet1;
+        if (s1) {
+          s1el.innerHTML = buildSourceBlock_('✓ Sheet1', SHEET1_LINK, s1);
+          logStep_(`✓ Source: Sheet1 found (${asin})`);
+        } else {
+          s1el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet1 — not found</div>`;
+          logStep_(`✗ Source: Sheet1 not found (${asin})`);
+        }
       }
       wrap.appendChild(s1el);
       addCollapseListeners_(s1el);
 
       // Sheet2
       const s2el = document.createElement('div');
-      const s2 = allSources?.sheet2;
-      if (s2) {
-        s2el.innerHTML = buildSourceBlock_('✓ Sheet2', SHEET2_LINK, s2);
-        logStep_(`✓ Source: Sheet2 found (${asin})`);
+      if (allSources === null) {
+        s2el.innerHTML = `<div style="font-size:11px;color:#c00;padding:2px 0;">⚠️ Sheet2 — fetch error</div>`;
+        logStep_(`⚠️ Source: Sheet2 fetch error (${asin})`);
       } else {
-        s2el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet2 — not found</div>`;
-        logStep_(`✗ Source: Sheet2 not found (${asin})`);
+        const s2 = allSources.sheet2;
+        if (s2) {
+          s2el.innerHTML = buildSourceBlock_('✓ Sheet2', SHEET2_LINK, s2);
+          logStep_(`✓ Source: Sheet2 found (${asin})`);
+        } else {
+          s2el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet2 — not found</div>`;
+          logStep_(`✗ Source: Sheet2 not found (${asin})`);
+        }
       }
       wrap.appendChild(s2el);
       addCollapseListeners_(s2el);
@@ -1298,9 +1320,9 @@
   }
 
   // ── Fetch order via GAS ───────────────────────────────────────────────────
-  function fetchOrder(orderId) {
+  function fetchOrder(orderId, _retry) {
     setStatus('⏳ Fetching order data…');
-    logStep_(`⏳ Fetching order ${orderId}…`);
+    if (!_retry) logStep_(`⏳ Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
       url:      `${GAS_URL}?orderId=${encodeURIComponent(orderId)}`,
@@ -1309,6 +1331,17 @@
       onload(res) {
         const result = document.getElementById('sp-result');
         if (!result) return;
+        if (res.responseText.trimStart().startsWith('<')) {
+          if (!_retry) {
+            logStep_('⚠️ GAS not ready, retrying order…');
+            setStatus('⏳ GAS warming up, retrying…');
+            setTimeout(() => fetchOrder(orderId, true), 2000);
+            return;
+          }
+          setStatus('⚠️ GAS error — refresh and try again');
+          logStep_('⚠️ Order fetch: GAS returned error page');
+          return;
+        }
         try {
           const data = JSON.parse(res.responseText);
           if (data.error) { setStatus('⚠️ ' + data.error); logStep_('⚠️ Order error: ' + data.error); return; }
