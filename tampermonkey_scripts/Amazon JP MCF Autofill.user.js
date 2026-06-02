@@ -1,13 +1,25 @@
 // ==UserScript==
 // @name         Amazon JP MCF Autofill
-// @version      1.4.4
+// @version      1.5.2
+// @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20JP%20MCF%20Autofill.user.js
+// @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20JP%20MCF%20Autofill.user.js
 // @match        https://sellercentral-japan.amazon.com/mcf/orders/create-order/*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        none
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  // Capture hash at document-start before Amazon's SPA can clear it
+  const _INIT_HASH = (() => {
+    const h = location.hash;
+    if (h && h.includes('spigen_mcf=')) {
+      try { sessionStorage.setItem('_spigen_mcf_hash', h); } catch(e) {}
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return h;
+  })();
 
   /**********************************************************
    * CONFIG
@@ -410,4 +422,43 @@
       navigator.clipboard.readText().then(t => t && fillJP(parseJP(t)));
     }
   });
+
+  // ── URL 해시 브릿지: Zendesk GCX Reply → JP MCF 자동입력 ────────────────
+  function waitForKatField(uniqueId, timeout) {
+    if (timeout === undefined) timeout = 15000;
+    return new Promise(function(resolve) {
+      const start = Date.now();
+      const timer = setInterval(function() {
+        const host = document.querySelector('kat-input[unique-id="' + uniqueId + '"]');
+        const ready = !!(host && host.shadowRoot && host.shadowRoot.querySelector('input,textarea'));
+        if (ready || Date.now() - start > timeout) { clearInterval(timer); resolve(ready); }
+      }, 300);
+    });
+  }
+
+  async function autoFillFromUrlHashJP() {
+    const hash = sessionStorage.getItem('_spigen_mcf_hash') || '';
+    sessionStorage.removeItem('_spigen_mcf_hash');
+    try {
+      if (!hash || !hash.includes('spigen_mcf=')) return;
+      const encoded = hash.split('spigen_mcf=')[1];
+      if (!encoded) return;
+
+      const d = JSON.parse(decodeURIComponent(atob(encoded)));
+      if (!d || d.region !== 'JP') return;
+
+      LOG('Zendesk URL 해시에서 자동입력 (JP) — 폼 대기 중…');
+      const ready = await waitForKatField('katal-id-2', 15000);
+      if (!ready) { LOG('JP MCF 폼 타임아웃'); return; }
+
+      LOG('JP MCF 폼 준비됨 — 자동입력 시작');
+      await fillJP({ postal:d.postal, stateJP:d.state, addr1:d.street,
+                     addr2:'', name:d.name, phone:d.phone, email:d.email, asin:d.asin });
+      if (d.orderId) await commitKat('katal-id-10', d.orderId);
+    } catch(e) { LOG('autoFillFromUrlHashJP error', e); }
+  }
+
+  setTimeout(autoFillFromUrlHashJP, 500);
+
 })();
+
