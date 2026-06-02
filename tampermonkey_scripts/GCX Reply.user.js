@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
 // @version      2.4.5
@@ -17,7 +17,7 @@
   'use strict';
 
   const GAS_URL    = 'https://script.google.com/macros/s/AKfycbw2Vdwk197LXB6oUAzuHS8sKamD5uqKZJDLvcHzbftWJk-M65XV1fAnTqiZo7ZEm4hk/exec';
-  const SHEET_URL  = 'https://docs.google.com/spreadsheets/d/1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo/';
+  const SHEET_URL  = 'https://docs.google.com/spreadsheets/d/1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo/edit?gid=0#gid=0';
   const ORDER_RE   = /\b(\d{3}-\d{7}-\d{7})\b/g;
   const ASIN_RE    = /\b(B[A-Z0-9]{9})\b/g;
   const PANEL_ID   = 'sp-order-panel';
