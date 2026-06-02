@@ -1,4 +1,4 @@
-// GCX Reply — Apps Script Web App
+// GCX Reply — Apps Script Web App (v2.4.1)
 // Endpoint: ?orderId=XXX  |  ?asin=XXX  |  ?orderId=XXX&asin=XXX
 // Deploy as: Execute as Me, Access: Anyone (or Anyone anonymous)
 // Script Properties required: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
