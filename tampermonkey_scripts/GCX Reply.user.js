@@ -1,7 +1,7 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.3
+// @version      2.4.4
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -43,6 +43,9 @@
     TOTAL_ORDERS:  21714421937305,
     TOTAL_REFUNDS: 21745453864345,
     SPIGEN_REFUND: 21745465897369,
+    DAEBUNRYU:     58529165213721,
+    SAENGSAN:      58529176884761,
+    ORIGIN_INFO:   58529167605273,
   };
 
   const COUNTRY_MAP = {
@@ -466,6 +469,9 @@
     fillZdInput('Order Status',       o.OrderStatus   || '');
     fillZdInput('Order Total',        orderTotal);
     fillZdInput('Delivery Level',     o.ShipmentServiceLevelCategory || '');
+    fillZdInput('대분류',             p['대분류']     || '');
+    fillZdInput('생산업체',           p['생산업체']   || '');
+    fillZdInput('원산지정보',         p['원산지정보'] || '');
 
     // 2. Build Zendesk API fields array
     const af = [];
@@ -482,6 +488,9 @@
     if (COUNTRY_MAP[ad.CountryCode])         af.push({ id: ZD.COUNTRY,       value: COUNTRY_MAP[ad.CountryCode] });
     const pop = salesChannelToPOP(o.SalesChannel);
     if (pop)                                 af.push({ id: ZD.POINT_OF_PUR,  value: pop });
+    if (p['대분류'])     af.push({ id: ZD.DAEBUNRYU,  value: p['대분류'] });
+    if (p['생산업체'])   af.push({ id: ZD.SAENGSAN,   value: p['생산업체'] });
+    if (p['원산지정보']) af.push({ id: ZD.ORIGIN_INFO, value: p['원산지정보'] });
 
     // 3. Brand(상세) from 대분류 — sync, push before async ops
     const brandTag = brandFromDaebunryu(p['대분류'] || '');
