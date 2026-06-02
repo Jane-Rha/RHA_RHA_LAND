@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.4
+// @version      2.4.5
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,8 +57,9 @@
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
 
   // ── Module state ─────────────────────────────────────────────────────────
-  let lastOrderData   = null;
-  let lastProductData = null;
+  let lastOrderData    = null;
+  let lastProductData  = null;
+  let lastAmazonProduct = null;
 
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
@@ -469,9 +470,13 @@
     fillZdInput('Order Status',       o.OrderStatus   || '');
     fillZdInput('Order Total',        orderTotal);
     fillZdInput('Delivery Level',     o.ShipmentServiceLevelCategory || '');
-    fillZdInput('대분류',             p['대분류']     || '');
-    fillZdInput('생산업체',           p['생산업체']   || '');
-    fillZdInput('원산지정보',         p['원산지정보'] || '');
+    const amz = lastAmazonProduct || {};
+    const daebunryu  = p['대분류']     || amz['대분류']     || '';
+    const saengsan   = p['생산업체']   || amz['생산업체']   || '';
+    const originInfo = p['원산지정보'] || amz['원산지정보'] || '';
+    fillZdInput('대분류',     daebunryu);
+    fillZdInput('생산업체',   saengsan);
+    fillZdInput('원산지정보', originInfo);
 
     // 2. Build Zendesk API fields array
     const af = [];
@@ -488,9 +493,9 @@
     if (COUNTRY_MAP[ad.CountryCode])         af.push({ id: ZD.COUNTRY,       value: COUNTRY_MAP[ad.CountryCode] });
     const pop = salesChannelToPOP(o.SalesChannel);
     if (pop)                                 af.push({ id: ZD.POINT_OF_PUR,  value: pop });
-    if (p['대분류'])     af.push({ id: ZD.DAEBUNRYU,  value: p['대분류'] });
-    if (p['생산업체'])   af.push({ id: ZD.SAENGSAN,   value: p['생산업체'] });
-    if (p['원산지정보']) af.push({ id: ZD.ORIGIN_INFO, value: p['원산지정보'] });
+    if (daebunryu)   af.push({ id: ZD.DAEBUNRYU,  value: daebunryu });
+    if (saengsan)    af.push({ id: ZD.SAENGSAN,   value: saengsan });
+    if (originInfo)  af.push({ id: ZD.ORIGIN_INFO, value: originInfo });
 
     // 3. Brand(상세) from 대분류 — sync, push before async ops
     const brandTag = brandFromDaebunryu(p['대분류'] || '');
@@ -665,6 +670,9 @@
         valid.find(r => r.source === 'sheet' || r.source === 'sheet1' || r.source === 'sheet2')?.product ||
         valid.find(r => r.source === 'market+amazon')?.product ||
         valid[0]?.product || null;
+      // Store Amazon product for fallback (대분류/생산업체/원산지정보 may be empty in sheet)
+      const amzResult = valid.find(r => r.amazonProduct);
+      if (amzResult?.amazonProduct) lastAmazonProduct = amzResult.amazonProduct;
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
@@ -808,6 +816,7 @@
       body.appendChild(amzEl);
 
       function setAmz(product, url) {
+        if (product) lastAmazonProduct = product; // fallback for 대분류/생산업체/원산지정보
         if (!amzEl.isConnected) return;
         if (product) {
           amzEl.innerHTML = buildSourceBlock_('✓ Amazon', url || null, product);
@@ -1714,6 +1723,7 @@
       asinInput.value  = '';
       lastOrderData    = null;
       lastProductData  = null;
+      lastAmazonProduct = null;
       const result = document.getElementById('sp-result');
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
