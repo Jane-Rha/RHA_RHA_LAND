@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.2
+// @version      2.4.3
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -1295,6 +1295,67 @@
     `;
   }
 
+  // ── Seller Central buyer purchase stats (SC session fallback) ────────────
+  // SP-API often lacks BuyerEmail PII permission → use the user's logged-in SC
+  // session. Hits /orders-api/order/{id} for buyer email, then
+  // /orders-api/search?qt=email&q={email} for a 2-year order count.
+  function fetchScBuyerStats_(orderId, salesChannel, countryCode, cb) {
+    const scUrl = sellerCentralUrl(orderId, salesChannel, countryCode);
+    if (!scUrl) { cb(null); return; }
+    const base = scUrl.match(/^https:\/\/[^/]+/)[0];
+
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: `${base}/orders-api/order/${orderId}`,
+      redirect: 'follow',
+      timeout: 15000,
+      onload(res) {
+        let email = null;
+        if (res.status === 200) {
+          try {
+            const d = JSON.parse(res.responseText);
+            email = d.order?.buyerEmail || d.order?.buyer?.email || null;
+          } catch {}
+          if (!email) {
+            const m = res.responseText.match(/"([^"@]+@marketplace\.amazon\.[^"]+)"/);
+            if (m) email = m[1];
+          }
+        }
+        if (!email) { cb(null); return; }
+        countByEmail_(email);
+      },
+      onerror() { cb(null); },
+      ontimeout() { cb(null); },
+    });
+
+    function countByEmail_(email) {
+      const now = Date.now();
+      const twoYearsAgo = Math.round(now - 2 * 365.25 * 24 * 3600 * 1000);
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: `${base}/orders-api/search?qt=email&q=${encodeURIComponent(email)}&date-range=${twoYearsAgo}-${now}`,
+        redirect: 'follow',
+        timeout: 15000,
+        onload(res) {
+          let count = null;
+          if (res.status === 200) {
+            try {
+              const d = JSON.parse(res.responseText);
+              count = d.totalCount ?? d.totalOrders
+                   ?? (Array.isArray(d.orders) ? d.orders.length : null);
+            } catch {
+              const m = res.responseText.match(/"(?:totalCount|totalOrders)"\s*:\s*(\d+)/);
+              if (m) count = parseInt(m[1], 10);
+            }
+          }
+          cb({ email, totalPurchases: count, totalRefunds: 0 });
+        },
+        onerror()  { cb({ email, totalPurchases: null }); },
+        ontimeout() { cb({ email, totalPurchases: null }); },
+      });
+    }
+  }
+
   // ── Seller Central orders-api fallback for ASIN + SKU ────────────────────
   // Uses the user's existing SC session cookies — no extra auth needed.
   // Tries marketplace-specific SC domain first, then sellercentral.amazon.com
@@ -1391,6 +1452,26 @@
               title.closest('.sp-block').classList.toggle('collapsed');
             });
           });
+
+          // SC session fallback: get buyer email + 2yr order count when SP-API can't provide it
+          if (data.totalPurchases == null) {
+            fetchScBuyerStats_(orderId, data.order?.SalesChannel, data.address?.CountryCode, stats => {
+              if (!result.isConnected || !stats) return;
+              if (stats.totalPurchases == null && !stats.email) return;
+              const updated = Object.assign({}, data, {
+                totalPurchases: stats.totalPurchases ?? data.totalPurchases,
+                totalRefunds:   stats.totalRefunds   ?? data.totalRefunds ?? 0,
+                buyer: Object.assign({}, data.buyer || {}, stats.email ? { BuyerEmail: stats.email } : {}),
+              });
+              lastOrderData = Object.assign({}, lastOrderData, updated);
+              logStep_(`SC buyer stats: 구매 ${stats.totalPurchases ?? '?'}건 (${stats.email || 'no email'})`);
+              result.innerHTML = renderOrder(updated, orderId, resolvedAsin);
+              result.querySelectorAll('.sp-block-title').forEach(t => {
+                t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
+              });
+              maybeShowAutoFill(document.getElementById(PANEL_ID));
+            });
+          }
 
           if (itemAsins.length) {
             logStep_(`Product lookup: ${itemAsins.join(', ')}`);
