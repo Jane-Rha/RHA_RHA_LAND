@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.0.1
+// @version      2.1.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -532,7 +532,7 @@
             const mkts = data.marketplaces || [];
             if (data.product && data.productSource !== 'market') {
               // Full data from sheet1 or sheet2 — use directly
-              results[idx] = { asin, product: data.product, source: data.productSource || 'sheet', marketplaces: mkts };
+              results[idx] = { asin, product: data.product, source: data.productSource || 'sheet', marketplaces: mkts, allSources: data.allSources || null };
               done(idx);
             } else if (data.product && data.productSource === 'market') {
               // Partial from country sheet (기종명 col A, 모델명 col B) — merge with Amazon
@@ -545,7 +545,7 @@
                   if (partial['모델명']) merged['모델명'] = partial['모델명'];
                   src = 'market+amazon';
                 }
-                results[idx] = { asin, product: merged, source: src, sourceUrl: amazonUrl, marketplaces: mkts };
+                results[idx] = { asin, product: merged, source: src, sourceUrl: amazonUrl, marketplaces: mkts, allSources: data.allSources || null, amazonProduct: amazonProduct || null, amazonUrl };
                 done(idx);
               });
             } else {
@@ -558,17 +558,20 @@
                   sourceUrl:    amazonUrl,
                   marketplaces: mkts,
                   error:        amazonProduct ? null : `${asin} not found in any sheet or Amazon page.`,
+                  allSources:   data.allSources || null,
+                  amazonProduct: amazonProduct || null,
+                  amazonUrl,
                 };
                 done(idx);
               });
             }
           } catch (err) {
-            results[idx] = { asin, product: null, source: null, marketplaces: [], error: 'Parse error: ' + err.message };
+            results[idx] = { asin, product: null, source: null, marketplaces: [], error: 'Parse error: ' + err.message, allSources: null };
             done(idx);
           }
         },
         onerror() {
-          results[idx] = { asin, product: null, source: null, error: 'Cannot reach GAS endpoint.' };
+          results[idx] = { asin, product: null, source: null, error: 'Cannot reach GAS endpoint.', allSources: null };
           done(idx);
         },
       });
@@ -621,7 +624,108 @@
       container.querySelectorAll('.sp-block-title').forEach(t => {
         t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
       });
+
+      appendSourcesSection_(container, results);
     }
+  }
+
+  // ── ASIN source blocks ────────────────────────────────────────────────────
+
+  function buildSourceBlock_(title, linkUrl, product) {
+    const link = linkUrl
+      ? ` <a href="${esc(linkUrl)}" target="_blank" rel="noopener"
+           style="font-size:10px;font-weight:normal;color:#5ba4cf;text-decoration:none;margin-left:4px;">↗</a>`
+      : '';
+    const fields = SHEET_COLS.map(col => {
+      const val = product[col];
+      if (!val) return '';
+      return `<div class="sp-row"><span class="sp-label" style="font-size:11.5px;">${esc(col)}</span><span class="sp-val" style="font-size:11.5px;">${esc(val)}</span></div>`;
+    }).filter(Boolean).join('');
+    return `
+      <div class="sp-block collapsed" style="margin-top:0;">
+        <div class="sp-block-title" style="border-top:1px solid #e9ebec;font-size:11.5px;">
+          ${esc(title)}${link}<span class="sp-chevron" style="margin-left:auto;">▾</span>
+        </div>
+        <div class="sp-block-body">
+          ${fields || '<div class="sp-row"><span class="sp-val" style="color:#aaa;font-size:11px;">No data</span></div>'}
+        </div>
+      </div>`;
+  }
+
+  function addCollapseListeners_(el) {
+    el.querySelectorAll('.sp-block-title').forEach(t => {
+      t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
+    });
+  }
+
+  function appendSourcesSection_(container, results) {
+    const SHEET1_LINK = 'https://docs.google.com/spreadsheets/d/1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo/edit?gid=0';
+    const SHEET2_LINK = 'https://docs.google.com/spreadsheets/d/172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA/edit?gid=716900287';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:0 14px 8px;';
+
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'font-size:11.5px;font-weight:600;color:#5ba4cf;padding:8px 0 4px;border-top:1px solid #e9ebec;margin-top:4px;';
+    hdr.textContent = '📍 ASIN Sources';
+    wrap.appendChild(hdr);
+    container.appendChild(wrap);
+
+    results.forEach(r => {
+      if (!r || !r.asin) return;
+      const { asin, allSources } = r;
+
+      if (results.length > 1) {
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'font-size:11px;font-weight:600;color:#888;padding:2px 0;font-family:monospace;';
+        lbl.textContent = asin;
+        wrap.appendChild(lbl);
+      }
+
+      // Sheet1
+      const s1el = document.createElement('div');
+      const s1 = allSources?.sheet1;
+      if (s1) {
+        s1el.innerHTML = buildSourceBlock_('✓ Sheet1', SHEET1_LINK, s1);
+      } else {
+        s1el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet1 — not found</div>`;
+      }
+      wrap.appendChild(s1el);
+      addCollapseListeners_(s1el);
+
+      // Sheet2
+      const s2el = document.createElement('div');
+      const s2 = allSources?.sheet2;
+      if (s2) {
+        s2el.innerHTML = buildSourceBlock_('✓ Sheet2', SHEET2_LINK, s2);
+      } else {
+        s2el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet2 — not found</div>`;
+      }
+      wrap.appendChild(s2el);
+      addCollapseListeners_(s2el);
+
+      // Amazon (async — reuse if already fetched during Product Info lookup)
+      const amzEl = document.createElement('div');
+      amzEl.innerHTML = `<div style="font-size:11px;color:#aaa;padding:2px 0;">🔍 Amazon — checking…</div>`;
+      wrap.appendChild(amzEl);
+
+      function setAmz(product, url) {
+        if (!amzEl.isConnected) return;
+        if (product) {
+          amzEl.innerHTML = buildSourceBlock_('✓ Amazon', url || null, product);
+        } else {
+          amzEl.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Amazon — not found</div>`;
+        }
+        addCollapseListeners_(amzEl);
+      }
+
+      // amazonProduct is undefined → not yet fetched (sheet1/sheet2 path); null → fetched+not found
+      if (r.amazonProduct !== undefined) {
+        setAmz(r.amazonProduct, r.amazonUrl);
+      } else {
+        fetchAmazonProduct_(asin, setAmz);
+      }
+    });
   }
 
   // ── Styles ───────────────────────────────────────────────────────────────
