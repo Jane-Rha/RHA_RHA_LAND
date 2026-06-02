@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.3.0
+// @version      2.4.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -552,6 +552,7 @@
     if (!container) return;
     if (!asins.length) { container.innerHTML = ''; return; }
     container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info…</div>`;
+    logStep_(`⏳ GAS product lookup: ${asins.join(', ')}`);
 
     let loaded = 0;
     const results = new Array(asins.length).fill(null);
@@ -570,10 +571,12 @@
             const mkts = data.marketplaces || [];
             if (data.product && data.productSource !== 'market') {
               // Full data from sheet1 or sheet2 — use directly
+              logStep_(`✓ Product: found in ${data.productSource || 'sheet'} (${asin})`);
               results[idx] = { asin, product: data.product, source: data.productSource || 'sheet', marketplaces: mkts, allSources: data.allSources || null };
               done(idx);
             } else if (data.product && data.productSource === 'market') {
               // Partial from country sheet (기종명 col A, 모델명 col B) — merge with Amazon
+              logStep_(`ℹ Product: market sheet partial (${asin}), fetching Amazon…`);
               const partial = data.product;
               fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
                 let merged = partial, src = 'market';
@@ -583,12 +586,15 @@
                   if (partial['모델명']) merged['모델명'] = partial['모델명'];
                   src = 'market+amazon';
                 }
+                logStep_(amazonProduct ? `✓ Product: Amazon merged (${asin})` : `✗ Product: Amazon not found (${asin})`);
                 results[idx] = { asin, product: merged, source: src, sourceUrl: amazonUrl, marketplaces: mkts, allSources: data.allSources || null, amazonProduct: amazonProduct || null, amazonUrl };
                 done(idx);
               });
             } else {
               // Not in any sheet → fall back to Amazon product page
+              logStep_(`⏳ Product: not in sheets (${asin}), fetching Amazon…`);
               fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
+                logStep_(amazonProduct ? `✓ Product: Amazon (${asin})` : `✗ Product: not found anywhere (${asin})`);
                 results[idx] = {
                   asin,
                   product:      amazonProduct,
@@ -708,6 +714,7 @@
     hdr.textContent = '📍 ASIN Sources';
     wrap.appendChild(hdr);
     container.appendChild(wrap);
+    logStep_('📍 Checking ASIN sources…');
 
     results.forEach(r => {
       if (!r || !r.asin) return;
@@ -725,8 +732,10 @@
       const s1 = allSources?.sheet1;
       if (s1) {
         s1el.innerHTML = buildSourceBlock_('✓ Sheet1', SHEET1_LINK, s1);
+        logStep_(`✓ Source: Sheet1 found (${asin})`);
       } else {
         s1el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet1 — not found</div>`;
+        logStep_(`✗ Source: Sheet1 not found (${asin})`);
       }
       wrap.appendChild(s1el);
       addCollapseListeners_(s1el);
@@ -736,8 +745,10 @@
       const s2 = allSources?.sheet2;
       if (s2) {
         s2el.innerHTML = buildSourceBlock_('✓ Sheet2', SHEET2_LINK, s2);
+        logStep_(`✓ Source: Sheet2 found (${asin})`);
       } else {
         s2el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet2 — not found</div>`;
+        logStep_(`✗ Source: Sheet2 not found (${asin})`);
       }
       wrap.appendChild(s2el);
       addCollapseListeners_(s2el);
@@ -751,8 +762,10 @@
         if (!amzEl.isConnected) return;
         if (product) {
           amzEl.innerHTML = buildSourceBlock_('✓ Amazon', url || null, product);
+          logStep_(`✓ Source: Amazon found (${asin})`);
         } else {
           amzEl.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Amazon — not found</div>`;
+          logStep_(`✗ Source: Amazon not found (${asin})`);
         }
         addCollapseListeners_(amzEl);
       }
@@ -761,6 +774,7 @@
       if (r.amazonProduct !== undefined) {
         setAmz(r.amazonProduct, r.amazonUrl);
       } else {
+        logStep_(`🔍 Source: Amazon fetching… (${asin})`);
         fetchAmazonProduct_(asin, setAmz);
       }
     });
@@ -995,6 +1009,19 @@
       margin-top: 2px;
     }
 
+    #sp-load-log {
+      font-size: 10px;
+      color: #999;
+      padding: 3px 14px 4px;
+      border-top: 1px dashed #e5e7ea;
+      max-height: 56px;
+      overflow-y: auto;
+      font-family: monospace;
+      line-height: 1.6;
+      flex-shrink: 0;
+    }
+    #sp-load-log:empty { display: none; }
+
     #sp-toggle-btn {
       position: fixed;
       right: 16px;
@@ -1070,6 +1097,7 @@
         </div>
         <div id="sp-product-result"></div>
       </div>
+      <div id="sp-load-log"></div>
       <div id="sp-resize-handle"></div>
     `;
     return d;
@@ -1214,9 +1242,11 @@
           </div>
           ${row('Ship Service Level',  o.ShipServiceLevel)}
           ${row('Buyer Name',          buyerName)}
-          ${data.totalPurchases != null
-            ? rowLinked('Total Purchases', `구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건`, scSearchUrl)
-            : ''}
+          ${rowLinked('구매이력 (2yr)',
+              data.totalPurchases != null
+                ? `구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건`
+                : '—',
+              scSearchUrl)}
 
           ${it.length > 0 ? `<div class="sp-items-title">Items (${it.length})</div>${itemRows}` : ''}
         </div>
@@ -1270,6 +1300,7 @@
   // ── Fetch order via GAS ───────────────────────────────────────────────────
   function fetchOrder(orderId) {
     setStatus('⏳ Fetching order data…');
+    logStep_(`⏳ Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
       url:      `${GAS_URL}?orderId=${encodeURIComponent(orderId)}`,
@@ -1280,10 +1311,11 @@
         if (!result) return;
         try {
           const data = JSON.parse(res.responseText);
-          if (data.error) { setStatus('⚠️ ' + data.error); return; }
+          if (data.error) { setStatus('⚠️ ' + data.error); logStep_('⚠️ Order error: ' + data.error); return; }
 
           // Store for auto-fill
           lastOrderData = data;
+          logStep_(`✓ Order loaded — ${data.order?.SalesChannel || data.region || 'unknown'} | 구매이력: ${data.totalPurchases != null ? `구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건` : 'N/A'}`);
           maybeShowAutoFill(document.getElementById(PANEL_ID));
 
           const asinInput = document.getElementById('sp-asin-input');
@@ -1309,8 +1341,10 @@
           });
 
           if (itemAsins.length) {
+            logStep_(`⏳ Product lookup: ${itemAsins.join(', ')}`);
             renderAllProducts(itemAsins);
           } else if (resolvedAsin) {
+            logStep_(`⏳ Product lookup: ${resolvedAsin}`);
             renderAllProducts([resolvedAsin]);
           } else if (data.itemsStatus !== 200) {
             // SP-API items blocked → query Seller Central orders-api silently with user's SC session
@@ -1345,6 +1379,16 @@
     if (el) { el.textContent = msg; return; }
     const result = document.getElementById('sp-result');
     if (result) result.innerHTML = `<div id="sp-status">${esc(msg)}</div>`;
+  }
+
+  function logStep_(msg) {
+    const el = document.getElementById('sp-load-log');
+    if (!el) return;
+    const t    = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const line = document.createElement('div');
+    line.textContent = `${t}  ${msg}`;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
   }
 
   // ── Auto-detect order IDs from visible ticket text ─────────────────────
@@ -1538,6 +1582,8 @@
       if (autoBar) autoBar.style.display = 'none';
       const mcfBar = panel.querySelector('#sp-mcf-bar');
       if (mcfBar) mcfBar.style.display = 'none';
+      const logEl = document.getElementById('sp-load-log');
+      if (logEl) logEl.innerHTML = '';
       setFillStatus(panel, '');
     }
 
