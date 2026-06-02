@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.1
+// @version      2.4.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -532,11 +532,11 @@
       data:    JSON.stringify({ ticket: { custom_fields: af } }),
       onload(res) {
         if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
-        setFillStatus(panel, res.status === 200 ? `✓ ${af.length} fields saved` : `⚠️ API error ${res.status}`);
+        setFillStatus(panel, res.status === 200 ? `✓ ${af.length} fields saved` : `API error ${res.status}`);
       },
       onerror() {
         if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
-        setFillStatus(panel, '⚠️ Network error');
+        setFillStatus(panel, 'Network error');
       },
     });
   }
@@ -552,7 +552,7 @@
     if (!container) return;
     if (!asins.length) { container.innerHTML = ''; return; }
     container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info…</div>`;
-    if (!_retry) logStep_(`⏳ GAS product lookup: ${asins.join(', ')}`);
+    if (!_retry) logStep_(`GAS product lookup: ${asins.join(', ')}`);
 
     let loaded = 0;
     const results = new Array(asins.length).fill(null);
@@ -576,12 +576,12 @@
             const mkts = data.marketplaces || [];
             if (data.product && data.productSource !== 'market') {
               // Full data from sheet1 or sheet2 — use directly
-              logStep_(`✓ Product: found in ${data.productSource || 'sheet'} (${asin})`);
+              logStep_(`Product: found in ${data.productSource || 'sheet'} (${asin})`);
               results[idx] = { asin, product: data.product, source: data.productSource || 'sheet', marketplaces: mkts, allSources: data.allSources || null };
               done(idx);
             } else if (data.product && data.productSource === 'market') {
               // Partial from country sheet (기종명 col A, 모델명 col B) — merge with Amazon
-              logStep_(`ℹ Product: market sheet partial (${asin}), fetching Amazon…`);
+              logStep_(`Product: market sheet partial (${asin}), fetching Amazon…`);
               const partial = data.product;
               fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
                 let merged = partial, src = 'market';
@@ -591,15 +591,15 @@
                   if (partial['모델명']) merged['모델명'] = partial['모델명'];
                   src = 'market+amazon';
                 }
-                logStep_(amazonProduct ? `✓ Product: Amazon merged (${asin})` : `✗ Product: Amazon not found (${asin})`);
+                logStep_(amazonProduct ? `Product: Amazon merged (${asin})` : `Product: Amazon not found (${asin})`);
                 results[idx] = { asin, product: merged, source: src, sourceUrl: amazonUrl, marketplaces: mkts, allSources: data.allSources || null, amazonProduct: amazonProduct || null, amazonUrl };
                 done(idx);
               });
             } else {
               // Not in any sheet → fall back to Amazon product page
-              logStep_(`⏳ Product: not in sheets (${asin}), fetching Amazon…`);
+              logStep_(`Product: not in sheets (${asin}), fetching Amazon…`);
               fetchAmazonProduct_(asin, (amazonProduct, amazonUrl) => {
-                logStep_(amazonProduct ? `✓ Product: Amazon (${asin})` : `✗ Product: not found anywhere (${asin})`);
+                logStep_(amazonProduct ? `Product: Amazon (${asin})` : `Product: not found anywhere (${asin})`);
                 results[idx] = {
                   asin,
                   product:      amazonProduct,
@@ -644,7 +644,7 @@
     function finish() {
       if (!container.isConnected) return;
       if (!_retry && results.every(r => r.error === '__html__')) {
-        logStep_('⚠️ GAS not ready, retrying product lookup…');
+        logStep_('GAS not ready, retrying product lookup…');
         container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Retrying…</div>`;
         setTimeout(() => renderAllProducts(asins, true), 2000);
         return;
@@ -661,7 +661,7 @@
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
           const msg = error || `${esc(asin)} not found.`;
-          return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">⚠️ ${esc(msg)}</div>`;
+          return `<div style="font-size:11px;color:${error ? '#c00' : '#aaa'};padding:4px 0;">${esc(msg)}</div>`;
         }
         const label = asins.length > 1 ? esc(asin) : 'Product Info';
         return `
@@ -715,18 +715,36 @@
   }
 
   function appendSourcesSection_(container, results) {
-    const SHEET1_LINK = 'https://docs.google.com/spreadsheets/d/1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo/edit?gid=0';
+    const SHEET1_LINK = 'https://docs.google.com/spreadsheets/d/1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo/edit?gid=0#gid=0';
     const SHEET2_LINK = 'https://docs.google.com/spreadsheets/d/172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA/edit?gid=716900287';
 
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'padding:0 14px 8px;';
+    wrap.style.cssText = 'padding:0 14px 4px;';
 
+    // Collapsible header — collapsed by default
     const hdr = document.createElement('div');
-    hdr.style.cssText = 'font-size:11.5px;font-weight:600;color:#5ba4cf;padding:8px 0 4px;border-top:1px solid #e9ebec;margin-top:4px;';
-    hdr.textContent = '📍 ASIN Sources';
+    hdr.style.cssText = 'font-size:11.5px;font-weight:600;color:#5ba4cf;padding:8px 0 4px;border-top:1px solid #e9ebec;margin-top:4px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none;';
+    const hdrText = document.createElement('span');
+    hdrText.textContent = 'ASIN Sources';
+    const hdrChevron = document.createElement('span');
+    hdrChevron.textContent = '▸';
+    hdrChevron.style.cssText = 'font-size:10px;color:#aaa;';
+    hdr.appendChild(hdrText);
+    hdr.appendChild(hdrChevron);
+
+    const body = document.createElement('div');
+    body.style.display = 'none'; // collapsed by default
+
+    hdr.addEventListener('click', () => {
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : '';
+      hdrChevron.textContent = open ? '▸' : '▾';
+    });
+
     wrap.appendChild(hdr);
+    wrap.appendChild(body);
     container.appendChild(wrap);
-    logStep_('📍 Checking ASIN sources…');
+    logStep_('Checking ASIN sources…');
 
     results.forEach(r => {
       if (!r || !r.asin) return;
@@ -736,58 +754,58 @@
         const lbl = document.createElement('div');
         lbl.style.cssText = 'font-size:11px;font-weight:600;color:#888;padding:2px 0;font-family:monospace;';
         lbl.textContent = asin;
-        wrap.appendChild(lbl);
+        body.appendChild(lbl);
       }
 
-      // Sheet1
+      // ASIN Master (Sheet1)
       const s1el = document.createElement('div');
       if (allSources === null) {
-        s1el.innerHTML = `<div style="font-size:11px;color:#c00;padding:2px 0;">⚠️ Sheet1 — fetch error</div>`;
-        logStep_(`⚠️ Source: Sheet1 fetch error (${asin})`);
+        s1el.innerHTML = `<div style="font-size:11px;color:#c00;padding:2px 0;">ASIN Master — fetch error</div>`;
+        logStep_(`Source: ASIN Master fetch error (${asin})`);
       } else {
         const s1 = allSources.sheet1;
         if (s1) {
-          s1el.innerHTML = buildSourceBlock_('✓ Sheet1', SHEET1_LINK, s1);
-          logStep_(`✓ Source: Sheet1 found (${asin})`);
+          s1el.innerHTML = buildSourceBlock_('✓ ASIN Master', SHEET1_LINK, s1);
+          logStep_(`Source: ASIN Master found (${asin})`);
         } else {
-          s1el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet1 — not found</div>`;
-          logStep_(`✗ Source: Sheet1 not found (${asin})`);
+          s1el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ ASIN Master — not found</div>`;
+          logStep_(`Source: ASIN Master not found (${asin})`);
         }
       }
-      wrap.appendChild(s1el);
+      body.appendChild(s1el);
       addCollapseListeners_(s1el);
 
       // Sheet2
       const s2el = document.createElement('div');
       if (allSources === null) {
-        s2el.innerHTML = `<div style="font-size:11px;color:#c00;padding:2px 0;">⚠️ Sheet2 — fetch error</div>`;
-        logStep_(`⚠️ Source: Sheet2 fetch error (${asin})`);
+        s2el.innerHTML = `<div style="font-size:11px;color:#c00;padding:2px 0;">Sheet2 — fetch error</div>`;
+        logStep_(`Source: Sheet2 fetch error (${asin})`);
       } else {
         const s2 = allSources.sheet2;
         if (s2) {
           s2el.innerHTML = buildSourceBlock_('✓ Sheet2', SHEET2_LINK, s2);
-          logStep_(`✓ Source: Sheet2 found (${asin})`);
+          logStep_(`Source: Sheet2 found (${asin})`);
         } else {
           s2el.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Sheet2 — not found</div>`;
-          logStep_(`✗ Source: Sheet2 not found (${asin})`);
+          logStep_(`Source: Sheet2 not found (${asin})`);
         }
       }
-      wrap.appendChild(s2el);
+      body.appendChild(s2el);
       addCollapseListeners_(s2el);
 
       // Amazon (async — reuse if already fetched during Product Info lookup)
       const amzEl = document.createElement('div');
-      amzEl.innerHTML = `<div style="font-size:11px;color:#aaa;padding:2px 0;">🔍 Amazon — checking…</div>`;
-      wrap.appendChild(amzEl);
+      amzEl.innerHTML = `<div style="font-size:11px;color:#aaa;padding:2px 0;">Amazon — checking…</div>`;
+      body.appendChild(amzEl);
 
       function setAmz(product, url) {
         if (!amzEl.isConnected) return;
         if (product) {
           amzEl.innerHTML = buildSourceBlock_('✓ Amazon', url || null, product);
-          logStep_(`✓ Source: Amazon found (${asin})`);
+          logStep_(`Source: Amazon found (${asin})`);
         } else {
           amzEl.innerHTML = `<div style="font-size:11px;color:#bbb;padding:2px 0;">✗ Amazon — not found</div>`;
-          logStep_(`✗ Source: Amazon not found (${asin})`);
+          logStep_(`Source: Amazon not found (${asin})`);
         }
         addCollapseListeners_(amzEl);
       }
@@ -796,7 +814,7 @@
       if (r.amazonProduct !== undefined) {
         setAmz(r.amazonProduct, r.amazonUrl);
       } else {
-        logStep_(`🔍 Source: Amazon fetching… (${asin})`);
+        logStep_(`Source: Amazon fetching… (${asin})`);
         fetchAmazonProduct_(asin, setAmz);
       }
     });
@@ -821,6 +839,7 @@
       width: 330px;
       min-width: 200px;
       max-width: 700px;
+      max-height: calc(100vh - 80px);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -1321,8 +1340,8 @@
 
   // ── Fetch order via GAS ───────────────────────────────────────────────────
   function fetchOrder(orderId, _retry) {
-    setStatus('⏳ Fetching order data…');
-    if (!_retry) logStep_(`⏳ Fetching order ${orderId}…`);
+    setStatus('Fetching order data…');
+    if (!_retry) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
       url:      `${GAS_URL}?orderId=${encodeURIComponent(orderId)}`,
@@ -1333,22 +1352,22 @@
         if (!result) return;
         if (res.responseText.trimStart().startsWith('<')) {
           if (!_retry) {
-            logStep_('⚠️ GAS not ready, retrying order…');
-            setStatus('⏳ GAS warming up, retrying…');
+            logStep_('GAS not ready, retrying order…');
+            setStatus('Retrying…');
             setTimeout(() => fetchOrder(orderId, true), 2000);
             return;
           }
-          setStatus('⚠️ GAS error — refresh and try again');
-          logStep_('⚠️ Order fetch: GAS returned error page');
+          setStatus('GAS error — refresh and try again');
+          logStep_('Order fetch: GAS returned error page');
           return;
         }
         try {
           const data = JSON.parse(res.responseText);
-          if (data.error) { setStatus('⚠️ ' + data.error); logStep_('⚠️ Order error: ' + data.error); return; }
+          if (data.error) { setStatus(data.error); logStep_('Order error: ' + data.error); return; }
 
           // Store for auto-fill
           lastOrderData = data;
-          logStep_(`✓ Order loaded — ${data.order?.SalesChannel || data.region || 'unknown'} | 구매이력: ${data.totalPurchases != null ? `구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건` : 'N/A'}`);
+          logStep_(`Order loaded — ${data.order?.SalesChannel || data.region || 'unknown'} | 구매이력: ${data.totalPurchases != null ? `구매 ${data.totalPurchases}건 / 환불 ${data.totalRefunds}건` : 'N/A'}`);
           maybeShowAutoFill(document.getElementById(PANEL_ID));
 
           const asinInput = document.getElementById('sp-asin-input');
@@ -1374,15 +1393,15 @@
           });
 
           if (itemAsins.length) {
-            logStep_(`⏳ Product lookup: ${itemAsins.join(', ')}`);
+            logStep_(`Product lookup: ${itemAsins.join(', ')}`);
             renderAllProducts(itemAsins);
           } else if (resolvedAsin) {
-            logStep_(`⏳ Product lookup: ${resolvedAsin}`);
+            logStep_(`Product lookup: ${resolvedAsin}`);
             renderAllProducts([resolvedAsin]);
           } else if (data.itemsStatus !== 200) {
             // SP-API items blocked → query Seller Central orders-api silently with user's SC session
             const asinValEl = result.querySelector('.sp-row .sp-val');
-            if (asinValEl) asinValEl.textContent = '🔍 Seller Central…';
+            if (asinValEl) asinValEl.textContent = 'Seller Central…';
             fetchScItems(orderId, data.order?.SalesChannel, data.address?.CountryCode, scItems => {
               if (!result.isConnected) return;
               if (scItems && scItems.length) {
@@ -1399,11 +1418,11 @@
             });
           }
         } catch (err) {
-          setStatus('⚠️ Parse error: ' + err.message);
+          setStatus('Parse error: ' + err.message);
         }
       },
-      onerror()   { setStatus('⚠️ Cannot reach GAS endpoint — check GAS_URL in script settings.'); },
-      ontimeout() { setStatus('⚠️ Request timed out.'); },
+      onerror()   { setStatus('Cannot reach GAS endpoint — check GAS_URL in script settings.'); },
+      ontimeout() { setStatus('Request timed out.'); },
     });
   }
 

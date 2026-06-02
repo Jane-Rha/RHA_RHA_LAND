@@ -234,7 +234,7 @@ function getRdt_(endpoint, region, cred, orderId) {
   const r = spApiPost_(endpoint, region, cred, '/tokens/2021-03-01/restrictedDataToken', {
     restrictedResources: [
       { method: 'GET', path: `/orders/v0/orders/${orderId}/items` },
-      { method: 'GET', path: `/orders/v0/orders/${orderId}/buyerInfo` },
+      { method: 'GET', path: `/orders/v0/orders/${orderId}/buyerInfo`, dataElements: ['buyerInfo'] },
     ],
   });
   if (r.status !== 200) return { token: null, status: r.status, error: r.body };
