@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.6
+// @version      2.4.7
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
 // @match        https://spigenhelp.zendesk.com/agent/tickets/*
+// @match        https://spigenhelp.zendesk.com/agent/filters
+// @match        https://spigenhelp.zendesk.com/agent/filters/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @run-at       document-idle
@@ -1643,8 +1645,11 @@
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
+  function isTicketPage_() { return !!location.pathname.match(/\/tickets\/\d+/); }
+  function isFiltersPage_() { return !!location.pathname.match(/\/agent\/filters/); }
+
   function init() {
-    if (!location.pathname.match(/\/tickets\/\d+/)) return;
+    if (!isTicketPage_() && !isFiltersPage_()) return;
     if (document.getElementById(PANEL_ID)) return;
 
     let toggleBtn = document.getElementById('sp-toggle-btn');
@@ -1657,6 +1662,9 @@
 
     const panel = buildPanel();
     document.body.appendChild(panel);
+
+    // Start minimized on filter/list pages; expanded on ticket pages
+    if (!isTicketPage_()) panel.classList.add('minimized');
 
     const header = panel.querySelector('#sp-panel-header');
     makeDraggable(panel, header);
@@ -1765,11 +1773,26 @@
     let navTimer = null;
     function onNav() {
       const newId = location.pathname.match(/\/tickets\/(\d+)/)?.[1];
-      if (newId && newId !== lastTicketId) {
-        lastTicketId = newId;
-        resetPanel();
-        clearTimeout(navTimer);
-        navTimer = setTimeout(autoDetectAll, 2500);
+      if (newId) {
+        // Navigated to a ticket — always expand
+        if (panel.classList.contains('minimized')) {
+          panel.classList.remove('minimized');
+          if (panel.dataset.savedH) panel.style.height = panel.dataset.savedH;
+        }
+        if (newId !== lastTicketId) {
+          lastTicketId = newId;
+          resetPanel();
+          clearTimeout(navTimer);
+          navTimer = setTimeout(autoDetectAll, 2500);
+        }
+      } else {
+        // Left ticket pages (filters, views, etc.) — always collapse
+        lastTicketId = null;
+        if (!panel.classList.contains('minimized')) {
+          panel.dataset.savedH = panel.style.height || '';
+          panel.style.height = '';
+          panel.classList.add('minimized');
+        }
       }
     }
     const origPush    = history.pushState.bind(history);
@@ -1785,7 +1808,7 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    setTimeout(autoDetectAll, 2500);
+    if (isTicketPage_()) setTimeout(autoDetectAll, 2500);
   }
 
   // Heartbeat: if both the panel AND the toggle button disappear from the DOM
