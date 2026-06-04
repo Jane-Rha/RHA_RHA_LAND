@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.5.1
+// @version      2.5.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -61,6 +61,7 @@
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
   let lastProductData  = null;
+  let _panelSession    = 0; // incremented on every resetPanel(); guards stale async callbacks
 
   // ── UI state persistence ──────────────────────────────────────────────────
   function loadUi() {
@@ -580,10 +581,11 @@
     renderAllProducts([asin]);
   }
 
-  function renderAllProducts(asins, _retry) {
+  function renderAllProducts(asins, _retry, _forceExpand) {
     const container = document.getElementById('sp-product-result');
     if (!container) return;
     if (!asins.length) { container.innerHTML = ''; return; }
+    const _session = _panelSession;
     container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Loading product info…</div>`;
     if (!_retry) logStep_(`GAS product lookup: ${asins.join(', ')}`);
 
@@ -675,11 +677,11 @@
     }
 
     function finish() {
-      if (!container.isConnected) return;
+      if (_panelSession !== _session || !container.isConnected) return;
       if (!_retry && results.every(r => r.error === '__html__')) {
         logStep_('GAS not ready, retrying product lookup…');
         container.innerHTML = `<div style="font-size:11px;color:#aaa;padding:4px 14px;">Retrying…</div>`;
-        setTimeout(() => renderAllProducts(asins, true), 2000);
+        setTimeout(() => renderAllProducts(asins, true, _forceExpand), 2000);
         return;
       }
       results.forEach(r => { if (r.error === '__html__') r.error = 'GAS error — refresh and try again'; });
@@ -717,7 +719,19 @@
         t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
       });
 
-      applySectionState(container);
+      if (_forceExpand) {
+        // ASIN-only ticket: apply saved state for non-product sections only;
+        // product blocks stay expanded (default) so product info is the focus
+        const _c = loadUi().collapsed || {};
+        container.querySelectorAll('[data-sp-section]').forEach(block => {
+          const key = block.dataset.spSection;
+          if (key.startsWith('product_')) return;
+          if (!(key in _c)) return;
+          if (_c[key]) block.classList.add('collapsed'); else block.classList.remove('collapsed');
+        });
+      } else {
+        applySectionState(container);
+      }
       appendSourcesSection_(container, results);
     }
   }
@@ -1480,6 +1494,7 @@
   // ── Fetch order via GAS ───────────────────────────────────────────────────
   function fetchOrder(orderId, _retries) {
     _retries = _retries || 0;
+    const _session = _panelSession;
     setStatus('Fetching order data…');
     if (!_retries) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
@@ -1488,6 +1503,7 @@
       redirect: 'follow',
       timeout:  30000,
       onload(res) {
+        if (_panelSession !== _session) return;
         const result = document.getElementById('sp-result');
         if (!result) return;
         if (res.responseText.trimStart().startsWith('<')) {
@@ -1536,7 +1552,7 @@
           // SC session fallback: get buyer email + 2yr order count when SP-API can't provide it
           if (data.totalPurchases == null) {
             fetchScBuyerStats_(orderId, data.order?.SalesChannel, data.address?.CountryCode, stats => {
-              if (!result.isConnected || !stats) return;
+              if (_panelSession !== _session || !result.isConnected || !stats) return;
               if (stats.totalPurchases == null && !stats.email) return;
               const updated = Object.assign({}, data, {
                 totalPurchases: stats.totalPurchases ?? data.totalPurchases,
@@ -1565,7 +1581,7 @@
             const asinValEl = result.querySelector('.sp-row .sp-val');
             if (asinValEl) asinValEl.textContent = 'Seller Central…';
             fetchScItems(orderId, data.order?.SalesChannel, data.address?.CountryCode, scItems => {
-              if (!result.isConnected) return;
+              if (_panelSession !== _session || !result.isConnected) return;
               if (scItems && scItems.length) {
                 lastOrderData.items = scItems;
                 const newAsins = scItems.map(i => i.ASIN).filter(Boolean);
@@ -1586,6 +1602,7 @@
       },
       onerror()   { setStatus('Cannot reach GAS endpoint — check GAS_URL in script settings.'); },
       ontimeout() {
+        if (_panelSession !== _session) return;
         if (_retries < 2) {
           logStep_(`Order timeout — retry ${_retries + 1}/2…`);
           setStatus('Retrying…');
@@ -1865,6 +1882,7 @@
       const logEl = document.getElementById('sp-load-log');
       if (logEl) logEl.innerHTML = '';
       setFillStatus(panel, '');
+      _panelSession++;
     }
 
     function autoDetectAll() {
@@ -1884,7 +1902,11 @@
         const detectedAsin = asin || [...new Set([...document.body.innerText.matchAll(ASIN_RE)].map(m => m[1]))][0];
         if (detectedAsin) {
           const ai = document.getElementById('sp-asin-input');
-          if (ai && !ai.value) { ai.value = detectedAsin; renderProductInfo(detectedAsin); }
+          if (ai && !ai.value) {
+            ai.value = detectedAsin;
+            const _asinOnly = !orderId && (!bodyIds || !bodyIds.length);
+            renderAllProducts([detectedAsin], false, _asinOnly);
+          }
         }
       });
     }
