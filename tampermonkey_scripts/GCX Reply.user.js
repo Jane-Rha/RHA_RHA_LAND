@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.5.0
+// @version      2.5.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -1478,9 +1478,10 @@
   }
 
   // ── Fetch order via GAS ───────────────────────────────────────────────────
-  function fetchOrder(orderId, _retry) {
+  function fetchOrder(orderId, _retries) {
+    _retries = _retries || 0;
     setStatus('Fetching order data…');
-    if (!_retry) logStep_(`Fetching order ${orderId}…`);
+    if (!_retries) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
       url:      `${GAS_URL}?orderId=${encodeURIComponent(orderId)}`,
@@ -1490,10 +1491,10 @@
         const result = document.getElementById('sp-result');
         if (!result) return;
         if (res.responseText.trimStart().startsWith('<')) {
-          if (!_retry) {
-            logStep_('GAS not ready, retrying order…');
+          if (_retries < 2) {
+            logStep_(`GAS not ready — retry ${_retries + 1}/2…`);
             setStatus('Retrying…');
-            setTimeout(() => fetchOrder(orderId, true), 2000);
+            setTimeout(() => fetchOrder(orderId, _retries + 1), 2000);
             return;
           }
           setStatus('GAS error — refresh and try again');
@@ -1584,7 +1585,16 @@
         }
       },
       onerror()   { setStatus('Cannot reach GAS endpoint — check GAS_URL in script settings.'); },
-      ontimeout() { setStatus('Request timed out.'); },
+      ontimeout() {
+        if (_retries < 2) {
+          logStep_(`Order timeout — retry ${_retries + 1}/2…`);
+          setStatus('Retrying…');
+          setTimeout(() => fetchOrder(orderId, _retries + 1), 3000);
+        } else {
+          setStatus('Request timed out.');
+          logStep_('Order fetch: timed out after 2 retries');
+        }
+      },
     });
   }
 
