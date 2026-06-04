@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.3
+// @version      1.0.4
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -191,7 +191,7 @@
     SE: '+46', FI: '+358', BE: '+32', AT: '+43', IE: '+353', PL: '+48',
     RO: '+40', HU: '+36', GR: '+30', CZ: '+420', SK: '+421', LT: '+370',
     LV: '+371', EE: '+372', MT: '+356', CY: '+357', SI: '+386', HR: '+385',
-    BG: '+359', GB: '+44'
+    BG: '+359', LU: '+352', DK: '+45', GB: '+44'
   };
 
   const countryFromPhone = (phone) => {
@@ -225,6 +225,16 @@
     if (/^Romania$/i.test(t) || /^Roumanie$/i.test(t)) return 'RO';
     if (/^Hungary$/i.test(t) || /^Hongrie$/i.test(t) || /^Ungarn$/i.test(t)) return 'HU';
     if (/^Czech/i.test(t) || /^Tch[eè]quie$/i.test(t) || /^Tschechien$/i.test(t)) return 'CZ';
+    if (/^Slovenia$/i.test(t) || /^Slowenien$/i.test(t)) return 'SI';
+    if (/^Slovakia$/i.test(t) || /^Slovaquie$/i.test(t) || /^Slowakei$/i.test(t)) return 'SK';
+    if (/^Croatia$/i.test(t) || /^Croatie$/i.test(t) || /^Kroatien$/i.test(t)) return 'HR';
+    if (/^Bulgaria$/i.test(t) || /^Bulgarie$/i.test(t)) return 'BG';
+    if (/^Estonia$/i.test(t) || /^Estonie$/i.test(t) || /^Estland$/i.test(t)) return 'EE';
+    if (/^Latvia$/i.test(t) || /^Lettonie$/i.test(t) || /^Lettland$/i.test(t)) return 'LV';
+    if (/^Lithuania$/i.test(t) || /^Lituanie$/i.test(t) || /^Litauen$/i.test(t)) return 'LT';
+    if (/^Malta$/i.test(t)) return 'MT';
+    if (/^Cyprus$/i.test(t) || /^Chypre$/i.test(t) || /^Zypern$/i.test(t)) return 'CY';
+    if (/^Luxembourg$/i.test(t)) return 'LU';
     if (/^India$/i.test(t) || /^Inde$/i.test(t)) return 'IN';
     if (/^Japan$/i.test(t) || /^Japon$/i.test(t) || /^日本$/.test(t)) return 'JP';
     if (/^United\s*States$/i.test(t) || /^USA?$/i.test(t)) return 'US';
