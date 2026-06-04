@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.8
+// @version      2.4.9
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -1119,6 +1119,35 @@
       margin-top: 4px;
       text-align: center;
     }
+
+    #sp-notes-bar {
+      margin-bottom: 6px;
+    }
+    #sp-notes-bar label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      color: #5ba4cf;
+      font-weight: 500;
+    }
+    #sp-notes-toggle { cursor: pointer; accent-color: #5ba4cf; }
+    #sp-notes-section {
+      display: none;
+      margin-bottom: 8px;
+    }
+    #sp-notes-content {
+      font-size: 12px;
+      color: #2f3941;
+      white-space: pre-wrap;
+      padding: 6px 8px;
+      background: #f8f9fa;
+      border: 1px solid #e9ebec;
+      border-radius: 4px;
+      min-height: 36px;
+    }
   `);
 
   // ── Panel HTML ────────────────────────────────────────────────────────────
@@ -1152,6 +1181,12 @@
         <div id="sp-mcf-bar">
           <button id="sp-mcf-btn">→ MCF</button>
           <div id="sp-mcf-status"></div>
+        </div>
+        <div id="sp-notes-bar">
+          <label><input type="checkbox" id="sp-notes-toggle"> Notes</label>
+        </div>
+        <div id="sp-notes-section">
+          <div id="sp-notes-content"></div>
         </div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
@@ -1725,6 +1760,23 @@
     panel.querySelector('#sp-autofill-btn').onclick = () => autoFillTicket(panel);
     panel.querySelector('#sp-mcf-btn').onclick = () => sendToMCF(panel);
 
+    const notesToggle  = panel.querySelector('#sp-notes-toggle');
+    const notesSection = panel.querySelector('#sp-notes-section');
+    const notesContent = panel.querySelector('#sp-notes-content');
+
+    function refreshNotes() {
+      const ta = document.querySelector('[data-test-id="notes-edit-text-area-test-id"]');
+      notesContent.textContent = ta?.value?.trim() || '(no notes)';
+    }
+    notesToggle.addEventListener('change', () => {
+      notesSection.style.display = notesToggle.checked ? 'block' : 'none';
+      if (notesToggle.checked) refreshNotes();
+    });
+    document.addEventListener('input', e => {
+      if (notesToggle.checked && e.target.matches('[data-test-id="notes-edit-text-area-test-id"]'))
+        notesContent.textContent = e.target.value.trim() || '(no notes)';
+    });
+
     // ── Reset panel on ticket navigation ────────────────────────────────────
     function resetPanel() {
       orderInput.value = '';
@@ -1742,6 +1794,10 @@
       if (autoBar) autoBar.style.display = 'none';
       const mcfBar = panel.querySelector('#sp-mcf-bar');
       if (mcfBar) mcfBar.style.display = 'none';
+      const notesToggleEl = panel.querySelector('#sp-notes-toggle');
+      if (notesToggleEl) notesToggleEl.checked = false;
+      const notesSectionEl = panel.querySelector('#sp-notes-section');
+      if (notesSectionEl) notesSectionEl.style.display = 'none';
       const logEl = document.getElementById('sp-load-log');
       if (logEl) logEl.innerHTML = '';
       setFillStatus(panel, '');
