@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.9
+// @version      2.5.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -61,6 +61,23 @@
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
   let lastProductData  = null;
+
+  // ── UI state persistence ──────────────────────────────────────────────────
+  function loadUi() {
+    try { return JSON.parse(localStorage.getItem('gcx_ui') || '{}'); } catch { return {}; }
+  }
+  function saveUi(patch) {
+    try { localStorage.setItem('gcx_ui', JSON.stringify(Object.assign(loadUi(), patch))); } catch {}
+  }
+  function applySectionState(container) {
+    const c = loadUi().collapsed || {};
+    container.querySelectorAll('[data-sp-section]').forEach(block => {
+      const key = block.dataset.spSection;
+      if (!(key in c)) return;
+      if (c[key]) block.classList.add('collapsed');
+      else block.classList.remove('collapsed');
+    });
+  }
   let lastAmazonProduct = null;
 
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
@@ -684,7 +701,7 @@
         }
         const label = asins.length > 1 ? esc(asin) : 'Product Info';
         return `
-          <div class="sp-block" style="margin-top:0;">
+          <div class="sp-block" style="margin-top:0;" data-sp-section="product_${esc(asin)}">
             <div class="sp-block-title" style="border-top:1px solid #e9ebec;">
               ${label}${sourceBadge_(source, sourceUrl)}
               <span class="sp-chevron">▾</span>
@@ -700,6 +717,7 @@
         t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
       });
 
+      applySectionState(container);
       appendSourcesSection_(container, results);
     }
   }
@@ -752,12 +770,17 @@
     hdr.appendChild(hdrChevron);
 
     const body = document.createElement('div');
-    body.style.display = 'none'; // collapsed by default
+    const _asinSrcCollapsed = (loadUi().collapsed || {})['asin_sources'] !== false;
+    body.style.display = _asinSrcCollapsed ? 'none' : '';
+    hdrChevron.textContent = _asinSrcCollapsed ? '▸' : '▾';
 
     hdr.addEventListener('click', () => {
       const open = body.style.display !== 'none';
       body.style.display = open ? 'none' : '';
       hdrChevron.textContent = open ? '▸' : '▾';
+      const c = loadUi().collapsed || {};
+      c['asin_sources'] = open;
+      saveUi({ collapsed: c });
     });
 
     wrap.appendChild(hdr);
@@ -1309,7 +1332,7 @@
     return `
       ${rowReturnAsin(returnAsin, o.SalesChannel, data.itemsStatus)}
 
-      <div class="sp-block">
+      <div class="sp-block" data-sp-section="order">
         <div class="sp-block-title">
           <svg width="16" height="16" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
             <text x="3" y="38" font-size="38" font-family="Georgia,serif" font-style="italic" fill="#FF9900">a</text>
@@ -1326,7 +1349,7 @@
           ${row('Delivery Level',   o.ShipmentServiceLevelCategory || o.ShipServiceLevelCategory)}
           ${row('Ship Date',        fmtShipRange(o.EarliestShipDate, o.LatestShipDate))}
 
-          <div class="sp-block collapsed">
+          <div class="sp-block collapsed" data-sp-section="shipping">
             <div class="sp-block-title" style="font-size:12px;">
               Shipping Address
               <span class="sp-chevron">▾</span>
@@ -1507,6 +1530,7 @@
               title.closest('.sp-block').classList.toggle('collapsed');
             });
           });
+          applySectionState(result);
 
           // SC session fallback: get buyer email + 2yr order count when SP-API can't provide it
           if (data.totalPurchases == null) {
@@ -1524,6 +1548,7 @@
               result.querySelectorAll('.sp-block-title').forEach(t => {
                 t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
               });
+              applySectionState(result);
               maybeShowAutoFill(document.getElementById(PANEL_ID));
             });
           }
@@ -1548,6 +1573,7 @@
                 result.querySelectorAll('.sp-block-title').forEach(t => {
                   t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
                 });
+                applySectionState(result);
                 renderAllProducts(newAsins);
                 maybeShowAutoFill(document.getElementById(PANEL_ID));
               }
@@ -1649,6 +1675,7 @@
       };
       const onUp = () => {
         handle._dragMoved = moved;
+        if (moved) saveUi({ x: parseInt(panel.style.left), y: parseInt(panel.style.top) });
         removeEventListener('mousemove', onMove);
         removeEventListener('mouseup', onUp);
       };
@@ -1671,6 +1698,7 @@
         panel.style.height = h + 'px';
       };
       const onUp = () => {
+        saveUi({ w: panel.offsetWidth, h: panel.offsetHeight });
         removeEventListener('mousemove', onMove);
         removeEventListener('mouseup', onUp);
       };
@@ -1697,6 +1725,13 @@
 
     const panel = buildPanel();
     document.body.appendChild(panel);
+
+    // Restore saved size + position
+    const _savedUi = loadUi();
+    if (_savedUi.w) panel.style.width  = _savedUi.w + 'px';
+    if (_savedUi.h) panel.style.height = _savedUi.h + 'px';
+    if (_savedUi.x != null) { panel.style.left = _savedUi.x + 'px'; panel.style.right = 'auto'; }
+    if (_savedUi.y != null) panel.style.top = _savedUi.y + 'px';
 
     // Start minimized on filter/list pages; expanded on ticket pages
     if (!isTicketPage_()) panel.classList.add('minimized');
@@ -1771,11 +1806,30 @@
     notesToggle.addEventListener('change', () => {
       notesSection.style.display = notesToggle.checked ? 'block' : 'none';
       if (notesToggle.checked) refreshNotes();
+      saveUi({ notes: notesToggle.checked });
     });
+    if (loadUi().notes) {
+      notesToggle.checked = true;
+      notesSection.style.display = 'block';
+      refreshNotes();
+    }
     document.addEventListener('input', e => {
       if (notesToggle.checked && e.target.matches('[data-test-id="notes-edit-text-area-test-id"]'))
         notesContent.textContent = e.target.value.trim() || '(no notes)';
     });
+
+    // ── Persist section collapse state (capture phase runs before stopPropagation) ──
+    panel.addEventListener('click', e => {
+      const title = e.target.closest('.sp-block-title');
+      if (!title) return;
+      const block = title.closest('[data-sp-section]');
+      if (!block) return;
+      setTimeout(() => {
+        const c = loadUi().collapsed || {};
+        c[block.dataset.spSection] = block.classList.contains('collapsed');
+        saveUi({ collapsed: c });
+      }, 0);
+    }, true);
 
     // ── Reset panel on ticket navigation ────────────────────────────────────
     function resetPanel() {
