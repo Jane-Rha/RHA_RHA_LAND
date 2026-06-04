@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.5
+// @version      2.4.6
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -1482,7 +1482,7 @@
                 buyer: Object.assign({}, data.buyer || {}, stats.email ? { BuyerEmail: stats.email } : {}),
               });
               lastOrderData = Object.assign({}, lastOrderData, updated);
-              logStep_(`SC buyer stats: 구매 ${stats.totalPurchases ?? '?'}건 (${stats.email || 'no email'})`);
+              logStep_(`SC buyer stats: 구매 ${stats.totalPurchases ?? '?'}건`);
               result.innerHTML = renderOrder(updated, orderId, resolvedAsin);
               result.querySelectorAll('.sp-block-title').forEach(t => {
                 t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
