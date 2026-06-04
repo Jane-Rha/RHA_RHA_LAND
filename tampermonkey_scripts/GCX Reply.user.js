@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.4.7
+// @version      2.4.8
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -1788,6 +1788,7 @@
       } else {
         // Left ticket pages (filters, views, etc.) — always collapse
         lastTicketId = null;
+        if (location.pathname.startsWith('/agent/filters')) resetPanel();
         if (!panel.classList.contains('minimized')) {
           panel.dataset.savedH = panel.style.height || '';
           panel.style.height = '';
