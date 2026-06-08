@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.6
+// @version      1.0.7
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.meta.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -479,13 +479,13 @@
       if (!res.ok) return false;
 
       const data = await res.json().catch(() => null);
-      if (!data || data.success !== true) return false;
+      if (!data || data.success !== true) return null;
 
-      LOG('Row marked MCF for:', email);
-      return true;
+      LOG('Row marked MCF for:', email, '| orderId:', data.orderId);
+      return data.orderId || null;
     } catch (e) {
       LOG('markRowMcfByEmail error', e);
-      return false;
+      return null;
     }
   }
 
@@ -702,14 +702,13 @@ async function fetchOrderIdByEmail(email) {
       }
 
       if (d.email) {
-        markRowMcfByEmail(d.email);
-        msg('Fetching Order ID…');
-        const order = await fetchOrderIdByEmail(d.email);
-        if (order) {
-          setOrderIdInput(order);
-          msg('Order ID auto-filled.');
+        msg('시트 업데이트 중…');
+        const orderId = await markRowMcfByEmail(d.email);
+        if (orderId) {
+          setOrderIdInput(orderId);
+          msg('Order ID 자동입력 완료: ' + orderId);
         } else {
-          msg('Order ID not found after retries.');
+          msg('시트 업데이트 완료 (Order ID 없음)');
         }
       }
 
@@ -760,14 +759,13 @@ async function fetchOrderIdByEmail(email) {
 
       if (d.asin) autoSelectBestSku();
       if (d.country) setTimeout(() => setCountry(d.country), 800);
-      if (d.email) markRowMcfByEmail(d.email);
-
       if (d.orderId) {
+        if (d.email) markRowMcfByEmail(d.email);  // fire-and-forget: just mark the row
         setTimeout(() => { setOrderIdInput(d.orderId); msg('✓ Zendesk 자동입력 완료'); }, 1200);
       } else if (d.email) {
-        msg('Order ID 조회 중…');
-        const order = await fetchOrderIdByEmail(d.email);
-        if (order) { setOrderIdInput(order); msg('✓ Zendesk 자동입력 완료'); }
+        msg('시트 업데이트 중…');
+        const orderId = await markRowMcfByEmail(d.email);
+        if (orderId) { setOrderIdInput(orderId); msg('✓ Zendesk 자동입력 완료'); }
         else msg('✓ 자동입력 완료 (Order ID 없음)');
       } else {
         msg('✓ Zendesk 자동입력 완료');

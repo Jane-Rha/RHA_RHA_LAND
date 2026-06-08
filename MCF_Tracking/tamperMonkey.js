@@ -62,11 +62,12 @@ function doGet(e) {
      ***********************************************/
     if (action === 'markMcf') {
       const person = (e?.parameter?.person || '김지우').trim() || '김지우';
-      markMcfRow_(sh, rowIndex, person);
+      const orderId = markMcfRow_(sh, rowIndex, person);
       return jsonResponse({
         success: true,
         email,
         rowIndex,
+        orderId,
         message: 'Row marked as MCF'
       });
     }
@@ -148,24 +149,25 @@ function markMcfRow_(sh, rowIndex, person) {
   const statusCol = getStatusCol_(sh);
 
   const 담당자Cell = sh.getRange(rowIndex, COL_U);
-  const 날짜Cell = sh.getRange(rowIndex, COL_P);
+  const 날짜Cell   = sh.getRange(rowIndex, COL_P);
   const statusCell = sh.getRange(rowIndex, statusCol);
-
-  const today = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+  const orderCell  = sh.getRange(rowIndex, COL_Q);
 
   Logger.log(
     `Marking row ${rowIndex} => 담당자(U=${COL_U}), 날짜(P=${COL_P}), StatusCol=${statusCol}`
   );
 
   담당자Cell.setValue(person || '김지우');
-
-
-  날짜Cell.setValue(today);
-
-
+  날짜Cell.setValue(new Date());   // real Date value so TEXT(P,"YYMMDD") formula works
   statusCell.setValue('MCF');
 
-  SpreadsheetApp.flush();
+  SpreadsheetApp.flush();  // commit writes + recalculate Q col formula
+
+  // Q col formula: =IF(S="mcf", HYPERLINK(..., "GCX-{B}-{YYMMDD}-{A}"), "")
+  // getDisplayValue() returns the link label text after flush
+  const orderId = orderCell.getDisplayValue().trim();
+  Logger.log(`Q col orderId after flush: "${orderId}"`);
+  return orderId;
 }
 
 /*******************************************************
