@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.4
+// @version      1.0.5
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.meta.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -73,6 +73,12 @@
         <button id="mcf-hide" style="all:unset;cursor:pointer;color:#00ff9c;">×</button>
       </div>
       <button id="mcf-clip" class="zx-btn">Paste from Clipboard</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <span style="color:#9cffd8;white-space:nowrap;font-size:11px;">담당자 (U col):</span>
+        <input id="mcf-person" type="text" value="김지우"
+          style="background:#0b0f0c;color:#00ff9c;border:1px solid #00ff9c66;border-radius:4px;
+                 padding:3px 7px;font-family:Consolas,Menlo,monospace;font-size:12px;width:90px;" />
+      </div>
       <div id="mcf-msg" style="margin-top:8px;min-width:320px;color:#9cffd8;"></div>
       <div style="color:#4ce6b4;margin-top:6px;">
         Hotkeys: <b>Alt+Shift+V</b> paste • <b>Ctrl+Alt+M</b> toggle
@@ -458,10 +464,12 @@
     if (!email) return false;
 
     try {
+      const person = (document.getElementById('mcf-person')?.value || '').trim() || '김지우';
       const url =
         SHEET_MCF_FLAG_ENDPOINT +
         '?email=' + encodeURIComponent(email) +
-        '&action=markMcf&match=last';
+        '&action=markMcf&match=last' +
+        '&person=' + encodeURIComponent(person);
 
       const res = await fetch(url, { method:'GET' });
       if (!res.ok) return false;

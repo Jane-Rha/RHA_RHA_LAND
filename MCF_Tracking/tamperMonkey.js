@@ -61,7 +61,8 @@ function doGet(e) {
      * Mark as MCF
      ***********************************************/
     if (action === 'markMcf') {
-      markMcfRow_(sh, rowIndex);
+      const person = (e?.parameter?.person || '김지우').trim() || '김지우';
+      markMcfRow_(sh, rowIndex, person);
       return jsonResponse({
         success: true,
         email,
@@ -143,7 +144,7 @@ function getStatusCol_(sh) {
 /*******************************************************
  * Mark 담당자 + 날짜 + Status="MCF"
  *******************************************************/
-function markMcfRow_(sh, rowIndex) {
+function markMcfRow_(sh, rowIndex, person) {
   const statusCol = getStatusCol_(sh);
 
   const 담당자Cell = sh.getRange(rowIndex, COL_U);
@@ -156,7 +157,7 @@ function markMcfRow_(sh, rowIndex) {
     `Marking row ${rowIndex} => 담당자(U=${COL_U}), 날짜(P=${COL_P}), StatusCol=${statusCol}`
   );
 
-  담당자Cell.setValue('김지우');
+  담당자Cell.setValue(person || '김지우');
 
 
   날짜Cell.setValue(today);
