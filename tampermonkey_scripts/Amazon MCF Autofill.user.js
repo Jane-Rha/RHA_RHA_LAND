@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.7
+// @version      1.0.8
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.meta.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -724,19 +724,6 @@ async function fetchOrderIdByEmail(email) {
   ui.querySelector('#mcf-clip').onclick = pasteFromClipboard;
 
   // ── URL 해시 브릿지: Zendesk GCX Reply → MCF 자동입력 ───────────────────
-  function waitForKatForm(timeout) {
-    if (timeout === undefined) timeout = 15000;
-    return new Promise(function(resolve) {
-      const start = Date.now();
-      const timer = setInterval(function() {
-        const field = [...document.querySelectorAll('kat-input')].find(
-          k => (k.getAttribute('label') || '').toLowerCase().includes('full name')
-        );
-        if (field || Date.now() - start > timeout) { clearInterval(timer); resolve(!!field); }
-      }, 300);
-    });
-  }
-
   async function autoFillFromUrlHash() {
     const hash = sessionStorage.getItem('_spigen_mcf_hash') || '';
     sessionStorage.removeItem('_spigen_mcf_hash');
@@ -748,19 +735,25 @@ async function fetchOrderIdByEmail(email) {
       const d = JSON.parse(decodeURIComponent(atob(encoded)));
       if (!d || d.region === 'JP') return;
 
-      msg('Zendesk에서 자동입력 중… (폼 대기)');
-      const ready = await waitForKatForm(15000);
-      if (!ready) { msg('폼 타임아웃'); return; }
+      msg('Zendesk에서 자동입력 중…');
 
-      msg('폼 준비됨 — 입력 중…');
-      fillAll({ name:d.name, street:d.street, city:d.city, state:d.state,
-                postal:d.postal, phone:d.phone, email:d.email,
-                country:d.country, countryRaw:d.country, q:d.asin });
+      // 특정 필드 대신 fillAll 자체를 최대 30초간 재시도
+      let filled = false;
+      for (let i = 0; i < 60; i++) {
+        await sleep(500);
+        const ok = fillAll({ name:d.name, street:d.street, city:d.city, state:d.state,
+                  postal:d.postal, phone:d.phone, email:d.email,
+                  country:d.country, countryRaw:d.country, q:d.asin });
+        if (ok) { filled = true; break; }
+      }
 
+      if (!filled) { msg('폼 타임아웃'); return; }
+
+      msg('입력 중…');
       if (d.asin) autoSelectBestSku();
       if (d.country) setTimeout(() => setCountry(d.country), 800);
       if (d.orderId) {
-        if (d.email) markRowMcfByEmail(d.email);  // fire-and-forget: just mark the row
+        if (d.email) markRowMcfByEmail(d.email);
         setTimeout(() => { setOrderIdInput(d.orderId); msg('✓ Zendesk 자동입력 완료'); }, 1200);
       } else if (d.email) {
         msg('시트 업데이트 중…');
