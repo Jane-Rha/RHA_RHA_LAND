@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.6.1
+// @version      2.6.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -2055,18 +2055,43 @@
     if (isTicketPage_()) setTimeout(autoDetectAll, 2500);
   }
 
-  // MCF 링크 href를 직접 패치 (클릭 인터셉트 대신 — iframe 안 링크도 커버)
+  // 국가 코드 → Amazon MCF Seller Central URL
+  function getMcfBase_(country) {
+    if (country === 'JP') return 'https://sellercentral-japan.amazon.com/mcf/orders/create-order';
+    const dom = {
+      DE:'amazon.de', FR:'amazon.fr', IT:'amazon.it', ES:'amazon.es',
+      NL:'amazon.nl', PL:'amazon.pl', SE:'amazon.se', BE:'amazon.be',
+      GB:'amazon.co.uk', IN:'amazon.in', AU:'amazon.com.au',
+      CA:'amazon.ca', MX:'amazon.com.mx', TR:'amazon.com.tr',
+    }[country];
+    return `https://sellercentral.${dom || 'amazon.com'}/mcf/orders/create-order`;
+  }
+
+  // MCF 링크 패치 — Amazon MCF 직접 링크 + Zendesk 매크로 Netlify 리다이렉트 링크 모두 커버
   function patchMcfLinks_(rootEl) {
     try {
+      // Amazon MCF 직접 링크
       (rootEl || document).querySelectorAll('a[href*="mcf/orders/create-order"]').forEach(link => {
         if (link.href.includes('spigen_mcf=') || link.dataset.mcfPatched) return;
         link.dataset.mcfPatched = '1';
-        const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
-        const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
-        const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
-        link.href = base + '#spigen_mcf=' + encoded;
-        link.target = '_blank';
-        link.rel = 'noopener';
+        link.addEventListener('click', e => {
+          e.preventDefault();
+          const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
+          const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+          const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
+          window.open(base + '#spigen_mcf=' + encoded, '_blank');
+        });
+      });
+      // Zendesk 매크로 Netlify 리다이렉트 링크 → Amazon MCF로 직접 열기
+      (rootEl || document).querySelectorAll('a[href*="dulcet-cendol-0ec85d.netlify.app"]').forEach(link => {
+        if (link.dataset.mcfPatched) return;
+        link.dataset.mcfPatched = '1';
+        link.addEventListener('click', e => {
+          e.preventDefault();
+          const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
+          const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+          window.open(getMcfBase_(payload.country) + '#spigen_mcf=' + encoded, '_blank');
+        });
       });
     } catch(e) {}
   }
