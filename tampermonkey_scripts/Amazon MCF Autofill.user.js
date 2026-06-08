@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.5
+// @version      1.0.6
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.meta.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -74,8 +74,8 @@
       </div>
       <button id="mcf-clip" class="zx-btn">Paste from Clipboard</button>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-        <span style="color:#9cffd8;white-space:nowrap;font-size:11px;">담당자 (U col):</span>
-        <input id="mcf-person" type="text" value="김지우"
+        <span style="color:#9cffd8;white-space:nowrap;font-size:11px;">발송자:</span>
+        <input id="mcf-person" type="text"
           style="background:#0b0f0c;color:#00ff9c;border:1px solid #00ff9c66;border-radius:4px;
                  padding:3px 7px;font-family:Consolas,Menlo,monospace;font-size:12px;width:90px;" />
       </div>
@@ -100,6 +100,10 @@
   const ui = panel();
   const msg = t => (ui.querySelector('#mcf-msg').textContent = t);
   ui.querySelector('#mcf-hide').onclick = () => (ui.style.display = 'none');
+
+  const personInput = ui.querySelector('#mcf-person');
+  personInput.value = localStorage.getItem('mcf_person') || '김지우';
+  personInput.addEventListener('input', () => localStorage.setItem('mcf_person', personInput.value));
 
   document.addEventListener('keydown', (e) => {
     if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'v') {
