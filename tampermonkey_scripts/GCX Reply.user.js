@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.5.2
+// @version      2.6.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -405,31 +405,132 @@
     if (mcfBar && lastOrderData) mcfBar.style.display = 'block';
   }
 
-  function sendToMCF(panel) {
-    if (!lastOrderData) return;
-    const o  = lastOrderData.order   || {};
-    const ad = lastOrderData.address || {};
-    const b  = lastOrderData.buyer   || {};
-    const itemAsins = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
-    const asin    = itemAsins[0] || panel.querySelector('#sp-asin-input')?.value.trim() || '';
-    const orderId = panel.querySelector('#sp-order-input')?.value.trim() || '';
-    const country = ad.CountryCode || '';
-    const payload = {
-      name:    b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '',
-      street:  ad.AddressLine1 || '',
-      city:    ad.City || '',
-      state:   ad.StateOrRegion || '',
-      postal:  ad.PostalCode || '',
-      phone:   ad.Phone || '',
-      email:   b.BuyerEmail || '',
+  // ── MCF: 티켓 본문 읽기 ────────────────────────────────────────────────────
+  function getTicketBodyText_() {
+    const m = location.pathname.match(/\/tickets\/(\d+)/);
+    const pane = (m && document.querySelector(`[data-test-id="ticket-${m[1]}-standard-layout"]`)) || document.body;
+    const inputText = [...pane.querySelectorAll('input, textarea')].map(el => el.value || '').join('\n');
+    return (pane.innerText || '') + '\n' + inputText;
+  }
+
+  // ── MCF: 티켓 본문에서 고객 주소 파싱 (MCF Autofill parseClipboard와 동일 로직) ─
+  const _MCF_PHONE_CC = {
+    PT:'+351',ES:'+34',DE:'+49',FR:'+33',IT:'+39',NL:'+31',SE:'+46',FI:'+358',
+    BE:'+32',AT:'+43',IE:'+353',PL:'+48',RO:'+40',HU:'+36',GR:'+30',CZ:'+420',
+    SK:'+421',LT:'+370',LV:'+371',EE:'+372',MT:'+356',CY:'+357',SI:'+386',
+    HR:'+385',BG:'+359',LU:'+352',DK:'+45',GB:'+44',US:'+1',CA:'+1',IN:'+91',JP:'+81',
+  };
+  function _mcfNormCountry(tok) {
+    if (!tok) return '';
+    const t = tok.trim();
+    if (/^UK$/i.test(t) || /^United\s*Kingdom$/i.test(t) || /^Grande.Bretagne$/i.test(t)) return 'GB';
+    if (/^DEU?$/i.test(t) || /^Germany$/i.test(t) || /^Deutschland$/i.test(t) || /^Allemagne$/i.test(t)) return 'DE';
+    if (/^Espa/i.test(t) || /^Spain$/i.test(t)) return 'ES';
+    if (/^Portugal/i.test(t)) return 'PT';
+    if (/^France$/i.test(t) || /^Francia$/i.test(t)) return 'FR';
+    if (/^Italy$/i.test(t) || /^Itali[ae]$/i.test(t) || /^Italie$/i.test(t)) return 'IT';
+    if (/^Netherlands$/i.test(t) || /^Holland$/i.test(t) || /^Pays.Bas$/i.test(t)) return 'NL';
+    if (/^Belgium$/i.test(t) || /^Belgique$/i.test(t) || /^Belgien$/i.test(t)) return 'BE';
+    if (/^Sweden$/i.test(t) || /^Sverige$/i.test(t)) return 'SE';
+    if (/^Poland$/i.test(t) || /^Polen$/i.test(t)) return 'PL';
+    if (/^Austria$/i.test(t) || /^[OÖ]sterreich$/i.test(t)) return 'AT';
+    if (/^Ireland$/i.test(t) || /^Irland$/i.test(t)) return 'IE';
+    if (/^Denmark$/i.test(t) || /^D[äa]nemark$/i.test(t)) return 'DK';
+    if (/^Finland$/i.test(t) || /^Finnland$/i.test(t)) return 'FI';
+    if (/^Greece$/i.test(t) || /^Griechenland$/i.test(t)) return 'GR';
+    if (/^Romania$/i.test(t) || /^Roumanie$/i.test(t)) return 'RO';
+    if (/^Hungary$/i.test(t) || /^Ungarn$/i.test(t)) return 'HU';
+    if (/^Czech/i.test(t) || /^Tschechien$/i.test(t)) return 'CZ';
+    if (/^Slovenia$/i.test(t) || /^Slowenien$/i.test(t)) return 'SI';
+    if (/^Slovakia$/i.test(t) || /^Slowakei$/i.test(t)) return 'SK';
+    if (/^Croatia$/i.test(t) || /^Kroatien$/i.test(t)) return 'HR';
+    if (/^Bulgaria$/i.test(t) || /^Bulgarie$/i.test(t)) return 'BG';
+    if (/^Estonia$/i.test(t) || /^Estland$/i.test(t)) return 'EE';
+    if (/^Latvia$/i.test(t) || /^Lettland$/i.test(t)) return 'LV';
+    if (/^Lithuania$/i.test(t) || /^Litauen$/i.test(t)) return 'LT';
+    if (/^Malta$/i.test(t)) return 'MT';
+    if (/^Cyprus$/i.test(t) || /^Zypern$/i.test(t)) return 'CY';
+    if (/^Luxembourg$/i.test(t)) return 'LU';
+    if (/^India$/i.test(t) || /^Inde$/i.test(t)) return 'IN';
+    if (/^Japan$/i.test(t) || /^日本$/.test(t)) return 'JP';
+    if (/^United\s*States$/i.test(t) || /^USA?$/i.test(t)) return 'US';
+    if (/^Canada$/i.test(t)) return 'CA';
+    return /^[A-Za-z]{2}$/.test(t) ? t.toUpperCase() : '';
+  }
+  function parseTicketAddress_(txt) {
+    if (!txt) return {};
+    const t = txt.replace(/\r/g,'').replace(/[–—]/g,'-').replace(/ /g,' ').replace(/[ \t]+/g,' ').trim();
+    const emailAll = t.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || [];
+    const email = [...emailAll].reverse().find(e =>
+      !/spigen\.com|zendesk\./i.test(e) &&
+      !(/amazon\.(com|co\.uk|de|fr|es|it|nl|se)/i.test(e) && !/marketplace\.amazon\./i.test(e))
+    ) || '';
+    const asin = (t.match(/\bASIN\b[^\w]{0,5}(B[A-Z0-9]{9})\b/i) || [])[1] || '';
+    const sku  = (t.match(/\bSKU\b[^\w]{0,5}([\w.-]{5,})/i) || [])[1] || '';
+    let cRaw = (t.match(/Country\*?\s*[:\-：]\s*([^\n]+)/i) || [])[1]
+            || (t.match(/^Country\*\n([A-Za-z]{2})\s*$/m) || [])[1]
+            || (t.match(/국가\s*[:\-：]\s*([^\n]+)/i) || [])[1] || '';
+    cRaw = cRaw.trim().replace(/\W+$/, '').trim();
+    const blocks = [];
+    let cur = null;
+    const pushCur = () => { if (cur && Object.values(cur).some(Boolean)) blocks.push(cur); cur = null; };
+    for (const line of t.split('\n').map(s => s.trim()).filter(Boolean)) {
+      const m = line.match(/^\s*\(?(\d+)\)?[.)]\s*(.+)$/i);
+      if (!m) continue;
+      const idx = parseInt(m[1], 10);
+      const val = m[2].trim().replace(/^(.+?):\s*/i,'').replace(/^(.+?)\s+--?\s*/i,'').trim();
+      if (idx === 1) { pushCur(); cur = { name:'',street:'',city:'',state:'',postal:'',phone:'' }; }
+      if (!cur) cur = { name:'',street:'',city:'',state:'',postal:'',phone:'' };
+      if      (idx === 1) cur.name   = val;
+      else if (idx === 2) cur.street = val;
+      else if (idx === 3) cur.city   = val;
+      else if (idx === 4) cur.state  = val;
+      else if (idx === 5) cur.postal = val;
+      else if (idx === 6) cur.phone  = val;
+      if (idx === 6) pushCur();
+    }
+    pushCur();
+    const addr = blocks.length ? blocks[blocks.length - 1] : {};
+    const phoneCountry = Object.entries(_MCF_PHONE_CC).find(([, cc]) => (addr.phone || '').includes(cc))?.[0] || '';
+    const country = _mcfNormCountry(cRaw) || phoneCountry;
+    return {
+      name:   addr.name   || '', street: addr.street || '', city:   addr.city   || '',
+      state:  addr.state  || '', postal: addr.postal || '', phone:  addr.phone  || '',
+      email, q: asin || sku, country,
+    };
+  }
+
+  // ── MCF: 주문 API + 티켓 본문 주소를 합쳐 해시 페이로드 생성 ─────────────────
+  function buildMcfPayload_(panelEl) {
+    const o  = lastOrderData?.order   || {};
+    const ad = lastOrderData?.address || {};
+    const b  = lastOrderData?.buyer   || {};
+    const itemAsins = (lastOrderData?.items || []).map(i => i.ASIN).filter(Boolean);
+    const asin    = itemAsins[0] || panelEl?.querySelector('#sp-asin-input')?.value.trim() || '';
+    const orderId = panelEl?.querySelector('#sp-order-input')?.value.trim() || '';
+    // 고객이 티켓에 직접 쓴 주소가 주문 API 주소보다 우선 (MCF 배송지이므로)
+    const ta = parseTicketAddress_(getTicketBodyText_());
+    const country = ta.country || ad.CountryCode || '';
+    return {
+      name:    ta.name   || b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '',
+      street:  ta.street || ad.AddressLine1 || '',
+      city:    ta.city   || ad.City || '',
+      state:   ta.state  || ad.StateOrRegion || '',
+      postal:  ta.postal || ad.PostalCode || '',
+      phone:   ta.phone  || ad.Phone || '',
+      email:   ta.email  || b.BuyerEmail || '',
       country,
-      asin,
+      asin:    ta.q || asin,
       orderId,
       region:  country === 'JP' ? 'JP' : 'global',
     };
-    // URL 해시로 데이터 전달 (localStorage는 도메인 간 공유 불가)
+  }
+
+  function sendToMCF(panel) {
+    if (!lastOrderData) return;
+    const payload = buildMcfPayload_(panel);
     const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
-    const mcfBase = country === 'JP'
+    const mcfBase = payload.country === 'JP'
       ? 'https://sellercentral-japan.amazon.com/mcf/orders/create-order/'
       : 'https://sellercentral.amazon.com/mcf/orders/create-order';
     window.open(mcfBase + '#spigen_mcf=' + encoded, '_blank');
@@ -1953,6 +2054,18 @@
 
     if (isTicketPage_()) setTimeout(autoDetectAll, 2500);
   }
+
+  // Zendesk 매크로 등이 삽입한 Amazon MCF 링크를 클릭하면 주소 해시를 자동 주입
+  document.addEventListener('click', e => {
+    const link = e.target.closest('a[href*="mcf/orders/create-order"]');
+    if (!link || link.href.includes('spigen_mcf=')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
+    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+    const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
+    window.open(base + '#spigen_mcf=' + encoded, '_blank');
+  }, true);
 
   // Heartbeat: if both the panel AND the toggle button disappear from the DOM
   // (Zendesk SPA re-render, slow initial load, etc.) re-run init automatically.
