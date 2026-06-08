@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.6.2
+// @version      2.6.3
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -2072,26 +2072,23 @@
     try {
       // Amazon MCF 직접 링크
       (rootEl || document).querySelectorAll('a[href*="mcf/orders/create-order"]').forEach(link => {
-        if (link.href.includes('spigen_mcf=') || link.dataset.mcfPatched) return;
-        link.dataset.mcfPatched = '1';
-        link.addEventListener('click', e => {
+        if (link.href.includes('spigen_mcf=')) return;
+        const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
+        link.onclick = e => {
           e.preventDefault();
           const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
           const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
-          const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
           window.open(base + '#spigen_mcf=' + encoded, '_blank');
-        });
+        };
       });
       // Zendesk 매크로 Netlify 리다이렉트 링크 → Amazon MCF로 직접 열기
       (rootEl || document).querySelectorAll('a[href*="dulcet-cendol-0ec85d.netlify.app"]').forEach(link => {
-        if (link.dataset.mcfPatched) return;
-        link.dataset.mcfPatched = '1';
-        link.addEventListener('click', e => {
+        link.onclick = e => {
           e.preventDefault();
           const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
           const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
           window.open(getMcfBase_(payload.country) + '#spigen_mcf=' + encoded, '_blank');
-        });
+        };
       });
     } catch(e) {}
   }
