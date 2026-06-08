@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.6.3
+// @version      2.6.4
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -2082,7 +2082,7 @@
         };
       });
       // Zendesk 매크로 Netlify 리다이렉트 링크 → Amazon MCF로 직접 열기
-      (rootEl || document).querySelectorAll('a[href*="dulcet-cendol-0ec85d.netlify.app"]').forEach(link => {
+      (rootEl || document).querySelectorAll('a[href*=".netlify.app"]').forEach(link => {
         link.onclick = e => {
           e.preventDefault();
           const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
