@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.6.0
+// @version      2.6.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -2055,17 +2055,40 @@
     if (isTicketPage_()) setTimeout(autoDetectAll, 2500);
   }
 
-  // Zendesk 매크로 등이 삽입한 Amazon MCF 링크를 클릭하면 주소 해시를 자동 주입
-  document.addEventListener('click', e => {
-    const link = e.target.closest('a[href*="mcf/orders/create-order"]');
-    if (!link || link.href.includes('spigen_mcf=')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
-    const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
-    const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
-    window.open(base + '#spigen_mcf=' + encoded, '_blank');
-  }, true);
+  // MCF 링크 href를 직접 패치 (클릭 인터셉트 대신 — iframe 안 링크도 커버)
+  function patchMcfLinks_(rootEl) {
+    try {
+      (rootEl || document).querySelectorAll('a[href*="mcf/orders/create-order"]').forEach(link => {
+        if (link.href.includes('spigen_mcf=') || link.dataset.mcfPatched) return;
+        link.dataset.mcfPatched = '1';
+        const payload = buildMcfPayload_(document.getElementById(PANEL_ID));
+        const encoded = btoa(encodeURIComponent(JSON.stringify(payload)));
+        const base = link.href.split('#')[0].replace(/\?[^]*$/, '');
+        link.href = base + '#spigen_mcf=' + encoded;
+        link.target = '_blank';
+        link.rel = 'noopener';
+      });
+    } catch(e) {}
+  }
+
+  // 메인 문서 감시
+  const _mcfLinkObs = new MutationObserver(() => patchMcfLinks_());
+  _mcfLinkObs.observe(document.body, { childList: true, subtree: true });
+  patchMcfLinks_();
+
+  // iframe 내부도 감시 (Zendesk 에디터 등)
+  if (typeof setInterval === 'function') setInterval(() => {
+    document.querySelectorAll('iframe').forEach(iframe => {
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc || !doc.body || doc.body.dataset.mcfWatching) return;
+        doc.body.dataset.mcfWatching = '1';
+        patchMcfLinks_(doc);
+        new MutationObserver(() => patchMcfLinks_(doc))
+          .observe(doc.body, { childList: true, subtree: true });
+      } catch(e) {}
+    });
+  }, 1000);
 
   // Heartbeat: if both the panel AND the toggle button disappear from the DOM
   // (Zendesk SPA re-render, slow initial load, etc.) re-run init automatically.
