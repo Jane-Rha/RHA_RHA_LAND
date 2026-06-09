@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.6.4
+// @version      2.7.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -287,10 +287,12 @@
     });
   }
 
-  // Tokenize: split camelCase, lowercase, strip dots and special chars, split on whitespace.
-  // camelCase split ensures "MagFit" and "Mag Fit" produce identical tokens.
+  // Tokenize: split camelCase + letter↔digit boundaries, lowercase, strip dots/specials.
+  // Letter↔digit split ensures "Fold7"→"Fold 7" and "Flip7"→"Flip 7" match dropdown options.
   function tokenize_(s) {
-    return s.replace(/([a-z])([A-Z])/g, '$1 $2')
+    return s.replace(/([a-z])([A-Z])/g, '$1 $2')      // camelCase: "MagFit" → "Mag Fit"
+            .replace(/([a-zA-Z])(\d)/g, '$1 $2')       // letter→digit: "Fold7" → "Fold 7"
+            .replace(/(\d)([a-zA-Z])/g, '$1 $2')       // digit→letter: "7Pro" → "7 Pro"
             .toLowerCase().replace(/\./g, '').replace(/[^a-z0-9가-힣]+/g, ' ').trim().split(/\s+/).filter(Boolean);
   }
 
@@ -314,7 +316,7 @@
       const score = jaccard_(tokenize_(name), labelToks);
       if (score > bestScore) { bestScore = score; bestVal = o.value; }
     }
-    return bestScore >= 0.25 ? bestVal : null;
+    return bestScore >= 0.5 ? bestVal : null;
   }
 
   // Find the best-matching Device dropdown option.
@@ -562,8 +564,11 @@
     // ASIN: prefer order item ASINs, fall back to panel input
     const itemAsins  = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
     const asinValue  = itemAsins.length ? itemAsins.join(', ') : panelAsin;
-    // SKU: prefer order items SellerSKU, fall back to product sheet
-    const itemSku    = lastOrderData.items?.[0]?.SellerSKU || p.SKU || '';
+    // SKU: prefer order items SellerSKU, fall back to product sheet.
+    // If SellerSKU looks like a barcode (all digits, 8+ chars), prefer sheet SKU — some
+    // Amazon listings use EAN-13 as the seller SKU, which is not a valid Spigen SKU.
+    const rawSellerSku = lastOrderData.items?.[0]?.SellerSKU || '';
+    const itemSku = (/^\d{8,}$/.test(rawSellerSku) ? (p.SKU || rawSellerSku) : rawSellerSku) || p.SKU || '';
     // Purchase / refund counts → ✅전체 주문 + ❎전체 환불 dropdowns (recent 2 years)
     const totalPurchases = lastOrderData.totalPurchases ?? lastOrderData.orderCount;
     const totalRefunds   = lastOrderData.totalRefunds;
@@ -571,7 +576,7 @@
     const refundsVal     = totalRefunds   != null ? `q${Math.min(totalRefunds,   50)}` : null;
     const buyerName    = b.BuyerName || o.BuyerInfo?.BuyerName || ad.Name || '';
     const orderTotal   = o.OrderTotal ? `${o.OrderTotal.Amount} ${o.OrderTotal.CurrencyCode}` : '';
-    const purchaseDateIso = o.PurchaseDate ? o.PurchaseDate.slice(0, 10) : '';
+    const purchaseDateIso = purchaseDateLocal_(o.PurchaseDate, ad.CountryCode);
     const purchaseDateDom = purchaseDateIso
       ? new Date(purchaseDateIso + 'T00:00:00Z').toLocaleDateString('en-US',
           { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
@@ -1348,6 +1353,30 @@
     return new Date(iso).toLocaleString('sv-SE', { timeZone: 'UTC' }).slice(0, 16).replace('T', ' ');
   }
 
+  // Seller Central shows purchase dates in the marketplace's local timezone, not UTC.
+  // SP-API returns UTC. Convert so GCX Reply matches Seller Central.
+  const PURCHASE_TZ_ = {
+    IN: 'Asia/Kolkata',     // IST = UTC+5:30
+    JP: 'Asia/Tokyo',       // JST = UTC+9
+    SG: 'Asia/Singapore',   // SGT = UTC+8
+    AU: 'Australia/Sydney', // AEST/AEDT
+    KR: 'Asia/Seoul',       // KST = UTC+9
+  };
+  function purchaseDateLocal_(isoUtc, countryCode) {
+    if (!isoUtc) return '';
+    const tz = PURCHASE_TZ_[countryCode];
+    if (!tz) return isoUtc.slice(0, 10);
+    return new Date(isoUtc).toLocaleDateString('sv-SE', { timeZone: tz });
+  }
+  function fmtPurchaseDate_(isoUtc, countryCode) {
+    if (!isoUtc) return '—';
+    const tz = PURCHASE_TZ_[countryCode];
+    if (!tz) return fmtDate(isoUtc) + ' (UTC)';
+    const local = new Date(isoUtc).toLocaleString('sv-SE', { timeZone: tz }).slice(0, 16).replace('T', ' ');
+    const label = { IN:'IST', JP:'JST', SG:'SGT', AU:'AEST', KR:'KST' }[countryCode] || tz;
+    return `${local} (${label})`;
+  }
+
   function fmtShipRange(earliest, latest) {
     if (!earliest) return '—';
     const fmt = iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -1459,7 +1488,7 @@
         <div class="sp-block-body">
           ${rowLinked('Amazon Order ID', orderId, sellerCentralUrl(orderId, o.SalesChannel, ad.CountryCode))}
           ${row('Order Status',     o.OrderStatus)}
-          ${row('Purchase Date',    fmtDate(o.PurchaseDate))}
+          ${row('Purchase Date',    fmtPurchaseDate_(o.PurchaseDate, ad.CountryCode))}
           ${row('Amount',           amount)}
           ${row('Delivery Level',   o.ShipmentServiceLevelCategory || o.ShipServiceLevelCategory)}
           ${row('Ship Date',        fmtShipRange(o.EarliestShipDate, o.LatestShipDate))}
@@ -1854,12 +1883,19 @@
     const panel = buildPanel();
     document.body.appendChild(panel);
 
-    // Restore saved size + position
+    // Restore saved size + position — clamp to viewport so panel never starts off-screen.
     const _savedUi = loadUi();
     if (_savedUi.w) panel.style.width  = _savedUi.w + 'px';
     if (_savedUi.h) panel.style.height = _savedUi.h + 'px';
-    if (_savedUi.x != null) { panel.style.left = _savedUi.x + 'px'; panel.style.right = 'auto'; }
-    if (_savedUi.y != null) panel.style.top = _savedUi.y + 'px';
+    if (_savedUi.x != null) {
+      const clampedX = Math.max(4, Math.min(_savedUi.x, window.innerWidth - 220));
+      panel.style.left = clampedX + 'px';
+      panel.style.right = 'auto';
+    }
+    if (_savedUi.y != null) {
+      const clampedY = Math.max(4, Math.min(_savedUi.y, window.innerHeight - 80));
+      panel.style.top = clampedY + 'px';
+    }
 
     // Start minimized on filter/list pages; expanded on ticket pages
     if (!isTicketPage_()) panel.classList.add('minimized');
