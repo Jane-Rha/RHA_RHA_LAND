@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.8
+// @version      1.0.9
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.meta.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -752,10 +752,7 @@ async function fetchOrderIdByEmail(email) {
       msg('입력 중…');
       if (d.asin) autoSelectBestSku();
       if (d.country) setTimeout(() => setCountry(d.country), 800);
-      if (d.orderId) {
-        if (d.email) markRowMcfByEmail(d.email);
-        setTimeout(() => { setOrderIdInput(d.orderId); msg('✓ Zendesk 자동입력 완료'); }, 1200);
-      } else if (d.email) {
+      if (d.email) {
         msg('시트 업데이트 중…');
         const orderId = await markRowMcfByEmail(d.email);
         if (orderId) { setOrderIdInput(orderId); msg('✓ Zendesk 자동입력 완료'); }
