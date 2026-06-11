@@ -54,7 +54,7 @@ function DR(inputText, category) {
       if (isValid_(r.text)) { output = r.text; break; }
     }
 
-    Logger.log(
+    console.log(
       `[DR] tokens — input: ${totalInputTokens}, output: ${totalOutputTokens}, ` +
       `total: ${totalInputTokens + totalOutputTokens} | ` +
       `"${inputText.slice(0, 60).replace(/\n/g, ' ')}…" → "${output.slice(0, 40)}"`
@@ -155,7 +155,7 @@ ${inputText}
     const code = res.getResponseCode();
     const body = res.getContentText();
 
-    Logger.log('MODEL: ' + model + ' | STATUS: ' + code);
+    console.log('MODEL: ' + model + ' | STATUS: ' + code);
 
     if (code !== 200) return EMPTY;
 
@@ -169,7 +169,7 @@ ${inputText}
     const inputTokens  = usage.promptTokenCount     || 0;
     const outputTokens = usage.candidatesTokenCount || 0;
 
-    Logger.log(`[DR] model=${model} in=${inputTokens} out=${outputTokens}`);
+    console.log(`[DR] model=${model} in=${inputTokens} out=${outputTokens}`);
 
     return { text, inputTokens, outputTokens };
 
@@ -255,6 +255,86 @@ function normalizeLoose_(text) {
  **********************************************************/
 function clearDRCache() {
   CacheService.getScriptCache().removeAll([]);
+}
+
+
+/**********************************************************
+ * BATCH TOKEN TEST — run this from the GAS editor, not Sheets
+ * Reads 본문 + 대분류 from the active sheet's 1-3점 tab,
+ * classifies each row via Gemini, writes result + token log.
+ *
+ * Before running: set TEST_ROW_START / TEST_ROW_END below.
+ **********************************************************/
+function testDRBatch() {
+  const TEST_ROW_START = 2;   // first data row (1-indexed)
+  const TEST_ROW_END   = 21;  // last row to test (inclusive)
+
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(UPLOAD_SHEET_NAME);
+  if (!sheet) { Logger.log('Sheet not found: ' + UPLOAD_SHEET_NAME); return; }
+
+  const hdr       = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const bonmunIdx = hdr.findIndex(h => String(h).trim() === '본문');
+  const daebunIdx = hdr.findIndex(h => String(h).trim() === '대분류');
+  const aiIdx     = hdr.findIndex(h => String(h).trim().includes('인입사유(AI)'));
+
+  if (bonmunIdx < 0) { Logger.log('본문 column not found'); return; }
+
+  const numRows = TEST_ROW_END - TEST_ROW_START + 1;
+  const data    = sheet.getRange(TEST_ROW_START, 1, numRows, sheet.getLastColumn()).getValues();
+
+  const { rawList, list, enrichedList } = loadDefectData_('');
+
+  let grandIn = 0, grandOut = 0, hits = 0, cached = 0;
+
+  const cache = CacheService.getScriptCache();
+
+  data.forEach((row, i) => {
+    const rowNum   = TEST_ROW_START + i;
+    const bodyText = String(row[bonmunIdx] || '').trim().toLowerCase();
+    const category = daebunIdx >= 0 ? String(row[daebunIdx] || '').trim() : '';
+    if (!bodyText) { Logger.log(`Row ${rowNum}: empty body — skipped`); return; }
+
+    const cacheKey = DR_CACHE_VERSION + Utilities.base64Encode(bodyText + '|' + category).slice(0, 100);
+    if (cache.get(cacheKey)) {
+      Logger.log(`Row ${rowNum}: cache hit — skipped Gemini call`);
+      cached++;
+      return;
+    }
+
+    let output = '', rowIn = 0, rowOut = 0;
+    for (const model of GEMINI_MODELS) {
+      const r = callGeminiModel_(bodyText, enrichedList, model);
+      rowIn  += r.inputTokens;
+      rowOut += r.outputTokens;
+      if (r.text && r.text.trim()) { output = r.text.trim(); break; }
+    }
+
+    grandIn  += rowIn;
+    grandOut += rowOut;
+    hits++;
+
+    Logger.log(
+      `Row ${rowNum}: in=${rowIn} out=${rowOut} total=${rowIn + rowOut} → "${output.slice(0, 40)}" | "${bodyText.slice(0, 50)}…"`
+    );
+
+    if (output && aiIdx >= 0) {
+      sheet.getRange(rowNum, aiIdx + 1).setValue(output);
+    }
+  });
+
+  const summary =
+    `=== testDRBatch summary ===\n` +
+    `Rows tested : ${numRows} (rows ${TEST_ROW_START}–${TEST_ROW_END})\n` +
+    `Gemini calls: ${hits}  |  Cache hits: ${cached}\n` +
+    `Total input tokens : ${grandIn}\n` +
+    `Total output tokens: ${grandOut}\n` +
+    `Grand total tokens : ${grandIn + grandOut}`;
+
+  Logger.log(summary);
+  SpreadsheetApp.getActive().toast(
+    `${hits} calls | ${grandIn + grandOut} total tokens`, 'DR Batch Test', 10
+  );
 }
 
 
