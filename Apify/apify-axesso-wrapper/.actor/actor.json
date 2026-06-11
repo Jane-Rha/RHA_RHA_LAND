@@ -3,7 +3,7 @@
   "name": "apify-axesso-wrapper",
   "title": "Amazon Reviews Scraper (powered by Axesso)",
   "description": "Drop-in wrapper for the Axesso Amazon Reviews scraper. Accepts the exact same input format, filters penalty rows, and returns only clean verified reviews.",
-  "version": "0.6",
+  "version": "0.11",
   "defaultMemoryMbytes": 256,
   "dockerfile": "../Dockerfile",
   "input": "./input_schema.json",
