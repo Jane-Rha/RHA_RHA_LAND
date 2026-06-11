@@ -6,9 +6,9 @@ const CACHE_TTL_SECONDS = 60 * 60 * 6;
 const DR_CACHE_VERSION = 'DR_v22_'; // bump this string to invalidate all cached results
 
 const GEMINI_MODELS = [
-  'gemini-3.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite',  // primary — cheap, sufficient for classification
+  'gemini-3-flash-preview',  // fallback
+  'gemini-3.5-flash',        // last resort
 ];
 
 
