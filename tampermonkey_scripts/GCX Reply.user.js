@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.7.8
+// @version      2.7.9
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +57,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.7.8';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.7.9';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -814,8 +814,8 @@
         { label: 'Point of Purchase', before: currentCfMap[ZD.POINT_OF_PUR] || '', after: pop || '', api: pop ? { id: ZD.POINT_OF_PUR, value: pop } : null },
         { label: 'Fulfillment',  before: currentCfMap[ZD.FULFILLMENT]  || '', after: resolvedFulfill?.name || '', api: resolvedFulfill?.val ? { id: ZD.FULFILLMENT, value: resolvedFulfill.val } : null },
         { label: 'Brand(상세)', before: currentCfMap[ZD.BRAND_DETAIL]  || '', after: brandTag || '', api: brandTag ? { id: ZD.BRAND_DETAIL, value: brandTag } : null },
-        { label: '총 주문 2yr', before: currentCfMap[ZD.TOTAL_ORDERS]  || '', after: purchasesVal || '', api: purchasesVal ? { id: ZD.TOTAL_ORDERS, value: purchasesVal } : null },
-        { label: '총 환불 2yr', before: currentCfMap[ZD.TOTAL_REFUNDS] || '', after: refundsVal || '', api: refundsVal ? { id: ZD.TOTAL_REFUNDS, value: refundsVal } : null },
+        { label: '✅전체 주문 (Product Issue, 아크테크X)*', before: currentCfMap[ZD.TOTAL_ORDERS]  || '', after: purchasesVal || '', api: purchasesVal ? { id: ZD.TOTAL_ORDERS, value: purchasesVal } : null },
+        { label: '❎전체 환불*', before: currentCfMap[ZD.TOTAL_REFUNDS] || '', after: refundsVal || '', api: refundsVal ? { id: ZD.TOTAL_REFUNDS, value: refundsVal } : null },
         { label: '사진/영상 유무', before: currentCfMap[ZD.PHOTO_EXIST] || '', after: resolvedHasPhoto != null ? (resolvedHasPhoto ? 'yes' : 'no') : '', api: resolvedHasPhoto != null ? { id: ZD.PHOTO_EXIST, value: resolvedHasPhoto ? 'yes' : 'no' } : null },
       ];
 
