@@ -1,9 +1,9 @@
 {
   "actorSpecification": 1,
   "name": "apify-axesso-wrapper",
-  "title": "Amazon Reviews Scraper (Multi-ASIN, Multi-Marketplace)",
-  "description": "Scrapes Amazon product reviews across multiple ASINs and marketplaces in one run. Powered by Axesso. Supports star-filter targeting, automatic dedup, and clean structured output.",
-  "version": "0.2",
+  "title": "Amazon Reviews Scraper (powered by Axesso)",
+  "description": "Drop-in wrapper for the Axesso Amazon Reviews scraper. Accepts the exact same input format, filters penalty rows, and returns only clean verified reviews.",
+  "version": "0.3",
   "defaultMemoryMbytes": 256,
   "dockerfile": "../Dockerfile",
   "input": "./input_schema.json"
