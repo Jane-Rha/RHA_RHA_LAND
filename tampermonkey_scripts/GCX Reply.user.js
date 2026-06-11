@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.0
+// @version      2.8.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +57,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.0';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.1';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -788,12 +788,18 @@
     let resolvedDevice   = null; // { val, name, opts }
     let resolvedProduct  = null; // { val, name }
     let resolvedFulfill  = null; // { val, name }
+    let fulfillOpts      = [];   // all fulfillment opts — for before display name
     let resolvedHasPhoto = null;
     let currentCfMap     = {};   // fieldId → raw value from current ticket
     let ticketSubject    = '';   // captured from ticket JSON — used for invoice detection
 
     // Always fetch device opts (was conditional on deviceLabel); needed for invoice override
     let remain = 1 + (productLabel ? 1 : 0) + 3; // device + fulfillment + comments + ticket
+
+    const BRAND_TAG_LABEL = {
+      spigen_case_: 'CASE', spigen_sp_: 'SP', spigen_sda_: 'SDA',
+      'spigen_pacc._': 'PAcc.', spigen_new_biz_: 'Newbiz', 'n/a': 'n/a',
+    };
 
     function buildAndShow() {
       if (--remain > 0) return;
@@ -804,23 +810,29 @@
         if (invoiceOpt) resolvedDevice = { val: invoiceOpt.value, name: invoiceOpt.name, opts: resolvedDevice.opts };
       }
 
+      // Refresh textRows "before" from ZD API (currentCfMap) — more reliable than DOM snapshot
+      for (const row of textRows) {
+        const cf = currentCfMap[row.dom.zdId];
+        if (cf !== undefined) row.before = cf;
+      }
+
       // API-only rows (no DOM text field counterpart)
       const apiOnlyRows = [
         { label: 'Device*', before: resolvedDevice?.opts?.find(o => o.value === currentCfMap[ZD.DEVICE])?.name || currentCfMap[ZD.DEVICE] || '',
           after: resolvedDevice?.name || '', api: resolvedDevice?.val ? { id: ZD.DEVICE, value: resolvedDevice.val } : null },
-        { label: 'Product Name *', before: resolvedDevice?.opts ? '' : '', // resolved separately
+        { label: 'Product Name *', before: '', // resolved below using product opts
           after: resolvedProduct?.name || '', api: resolvedProduct?.val ? { id: ZD.PRODUCT_NAME, value: resolvedProduct.val } : null },
         { label: 'Country*',      before: currentCfMap[ZD.COUNTRY]     || '', after: COUNTRY_MAP[ad.CountryCode] || '', api: COUNTRY_MAP[ad.CountryCode] ? { id: ZD.COUNTRY, value: COUNTRY_MAP[ad.CountryCode] } : null },
         { label: 'Point of Purchase', before: currentCfMap[ZD.POINT_OF_PUR] || '', after: pop || '', api: pop ? { id: ZD.POINT_OF_PUR, value: pop } : null },
-        { label: 'Amazon Fulfillment Methods*', before: currentCfMap[ZD.FULFILLMENT] || '', after: resolvedFulfill?.name || '', api: resolvedFulfill?.val ? { id: ZD.FULFILLMENT, value: resolvedFulfill.val } : null },
-        { label: 'Brand(상세)*', before: currentCfMap[ZD.BRAND_DETAIL]  || '', after: brandTag || '', api: brandTag ? { id: ZD.BRAND_DETAIL, value: brandTag } : null },
+        { label: 'Amazon Fulfillment Methods*', before: fulfillOpts.find(o => o.value === currentCfMap[ZD.FULFILLMENT])?.name || currentCfMap[ZD.FULFILLMENT] || '', after: resolvedFulfill?.name || '', api: resolvedFulfill?.val ? { id: ZD.FULFILLMENT, value: resolvedFulfill.val } : null },
+        { label: 'Brand(상세)*', before: BRAND_TAG_LABEL[currentCfMap[ZD.BRAND_DETAIL]] || currentCfMap[ZD.BRAND_DETAIL] || '', after: brandTag || '', api: brandTag ? { id: ZD.BRAND_DETAIL, value: brandTag } : null },
         { label: '✅전체 주문 (Product Issue, 아크테크X)*', before: currentCfMap[ZD.TOTAL_ORDERS]  || '', after: purchasesVal || '', api: purchasesVal ? { id: ZD.TOTAL_ORDERS, value: purchasesVal } : null },
         { label: '❎전체 환불*', before: currentCfMap[ZD.TOTAL_REFUNDS] || '', after: refundsVal || '', api: refundsVal ? { id: ZD.TOTAL_REFUNDS, value: refundsVal } : null },
         { label: '❗사진/영상 유무❗*', before: currentCfMap[ZD.PHOTO_EXIST] || '', after: resolvedHasPhoto != null ? (resolvedHasPhoto ? 'yes' : 'no') : '', api: resolvedHasPhoto != null ? { id: ZD.PHOTO_EXIST, value: resolvedHasPhoto ? 'yes' : 'no' } : null },
       ];
 
       // Resolve Product Name "before" using product opts
-      const pnRow = apiOnlyRows.find(r => r.label === 'Product Name');
+      const pnRow = apiOnlyRows.find(r => r.label === 'Product Name *');
       if (pnRow && resolvedProduct?.opts) {
         pnRow.before = resolvedProduct.opts.find(o => o.value === currentCfMap[ZD.PRODUCT_NAME])?.name?.replace(/^[^_]+_/, '') || currentCfMap[ZD.PRODUCT_NAME] || '';
       }
@@ -880,6 +892,7 @@
       });
     }
     fetchZdFieldOpts(ZD.FULFILLMENT, opts => {
+      fulfillOpts = opts;
       let fv = null;
       if (skuHasPan) { const o2 = opts.find(x => /pan\s*eu/i.test(x.name)); if (o2) fv = o2.value; }
       if (!fv && fulfillChannel) {
