@@ -7,8 +7,7 @@ const DR_CACHE_VERSION = 'DR_v22_'; // bump this string to invalidate all cached
 
 const GEMINI_MODELS = [
   'gemini-3.1-flash-lite',  // primary — cheap, sufficient for classification
-  'gemini-3-flash-preview',  // fallback
-  'gemini-3.5-flash',        // last resort
+  'gemini-3.5-flash',        // fallback
 ];
 
 

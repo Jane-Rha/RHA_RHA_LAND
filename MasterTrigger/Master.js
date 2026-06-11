@@ -772,7 +772,7 @@ function _callGeminiMaster_(prompt, maxOutputTokens) {
   const EMPTY = { text: '', inputTokens: 0, outputTokens: 0 };
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) { Logger.log('[Master] Missing GEMINI_API_KEY'); return EMPTY; }
-  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
+  const models = ['gemini-3.1-flash-lite', 'gemini-3.5-flash'];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -813,6 +813,70 @@ function _loadDefectCategories_(ss) {
   return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues()
     .filter(r => r[1])
     .map(r => `${String(r[1]).trim()}: ${String(r[2] || '').trim()}`);
+}
+
+/**
+ * One-time fix: scans all 4 DR-enabled destination sheets and replaces
+ * any live =dr() formula cells with their current static display value.
+ * Run manually once from the GAS editor — safe to re-run (idempotent).
+ */
+function fixLegacyDRFormulas() {
+  const TARGETS = [
+    { id: '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g', name: 'Glx26',    sheets: ['1-3점', '1-5점'] },
+    { id: '16xRJHH7Ynii4erNOn_905ST4CZs6OLpOYTof4uqsGsQ',  name: 'iPh17e',   sheets: ['1-3점', '1-5점'] },
+    { id: '1BpeGq5gIr4tNsPZmnHr19NNY6pQ6sb2_H-v3V9-It4E',  name: 'Pixel10a', sheets: ['1-3점', '1-5점'] },
+    { id: '1dlY6q8trbVMVJAjw_OUoxp1cguA2oTB8WlPhHR01xIw',  name: '유지훈P',  sheets: ['1-3점'] },
+  ];
+  let grandTotal = 0;
+
+  for (const target of TARGETS) {
+    const ss = SpreadsheetApp.openById(target.id);
+    for (const shName of target.sheets) {
+      try {
+        const sh = ss.getSheetByName(shName);
+        if (!sh || sh.getLastRow() < 2) {
+          Logger.log(`[${target.name}/${shName}] skip — no data`);
+          continue;
+        }
+        const lastRow = sh.getLastRow();
+        const lastCol = sh.getLastColumn();
+        const range    = sh.getRange(2, 1, lastRow - 1, lastCol);
+        const formulas = range.getFormulas();
+        const display  = range.getDisplayValues();
+
+        // Find every column that contains at least one =dr() formula
+        const drCols = new Set();
+        for (let r = 0; r < formulas.length; r++) {
+          for (let c = 0; c < formulas[r].length; c++) {
+            if (formulas[r][c].toLowerCase().startsWith('=dr(')) drCols.add(c);
+          }
+        }
+        if (drCols.size === 0) {
+          Logger.log(`[${target.name}/${shName}] no =dr() formulas — clean`);
+          continue;
+        }
+
+        let count = 0;
+        for (const c of drCols) {
+          const colVals = formulas.map((row, r) => {
+            if (row[c].toLowerCase().startsWith('=dr(')) {
+              count++;
+              const v = display[r][c];
+              return [v && !v.startsWith('#') ? v : ''];
+            }
+            return [display[r][c]];
+          });
+          sh.getRange(2, c + 1, lastRow - 1, 1).setValues(colVals);
+        }
+        SpreadsheetApp.flush();
+        Logger.log(`[${target.name}/${shName}] replaced ${count} =dr() formula(s) → static`);
+        grandTotal += count;
+      } catch (e) {
+        Logger.log(`[${target.name}/${shName}] ERROR: ${e.message}`);
+      }
+    }
+  }
+  Logger.log(`fixLegacyDRFormulas complete — total replaced: ${grandTotal}`);
 }
 
 function _classifyReview_(bodyText, enrichedCategories) {
