@@ -1,0 +1,37 @@
+{
+  "title": "Axesso Review Wrapper",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "taskId": {
+      "title": "Axesso Task ID (single)",
+      "description": "One Axesso saved-task ID. Use this for a single product. Ignored if taskIds is also set.",
+      "type": "string",
+      "editor": "textfield"
+    },
+    "taskIds": {
+      "title": "Axesso Task IDs (multiple)",
+      "description": "List of Axesso saved-task IDs to run in parallel (one per product). All results land in a single dataset.",
+      "type": "array",
+      "editor": "stringList"
+    },
+    "axessoInput": {
+      "title": "Direct Axesso Input (JSON)",
+      "description": "Raw Axesso actor input object. Used only when no taskId / taskIds is provided — lets you call the actor directly without a saved task.",
+      "type": "object",
+      "editor": "json"
+    },
+    "filterMode": {
+      "title": "Filter Mode",
+      "description": "How to filter Axesso output rows before pushing to dataset.",
+      "type": "string",
+      "editor": "select",
+      "enum": ["strict", "lenient"],
+      "enumTitles": [
+        "Strict — keep only statusCode=200 + statusMessage=FOUND",
+        "Lenient — only remove NO_REVIEWS_PENALTY rows"
+      ],
+      "default": "strict"
+    }
+  }
+}
