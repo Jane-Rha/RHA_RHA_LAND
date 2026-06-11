@@ -40,10 +40,17 @@ async def main():
     async with Actor:
         inp = await Actor.get_input() or {}
 
-        # Primary input: same format Axesso accepts — an `input` array of request objects
-        input_entries: list[dict] = inp.get('input', [])
-        filter_mode: str = inp.get('filterMode', 'strict')
-        max_budget_usd: float | None = inp.get('maxBudgetUsd')
+        # Accept either:
+        #   {"input": [...]}  — wrapped object (actor UI default)
+        #   [...]             — bare array (direct output from input-generator scripts)
+        if isinstance(inp, list):
+            input_entries: list[dict] = inp
+            filter_mode: str = 'strict'
+            max_budget_usd: float | None = None
+        else:
+            input_entries: list[dict] = inp.get('input', [])
+            filter_mode: str = inp.get('filterMode', 'strict')
+            max_budget_usd: float | None = inp.get('maxBudgetUsd')
 
         if not input_entries:
             Actor.log.error(
