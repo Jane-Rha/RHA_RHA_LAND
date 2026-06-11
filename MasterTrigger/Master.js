@@ -772,7 +772,7 @@ function _callGeminiMaster_(prompt, maxOutputTokens) {
   const EMPTY = { text: '', inputTokens: 0, outputTokens: 0 };
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) { Logger.log('[Master] Missing GEMINI_API_KEY'); return EMPTY; }
-  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
