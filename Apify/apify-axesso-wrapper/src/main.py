@@ -1,8 +1,8 @@
 """
-Apify Actor: Axesso Review Wrapper
-Calls one or more Axesso Amazon-review-scraper tasks (or the actor directly),
-filters out penalty / non-FOUND rows, and pushes clean reviews to this
-actor's own dataset — ready for the Master.gs dailyJob pipeline.
+Apify Actor: Amazon Reviews Scraper (powered by Axesso)
+Accepts a list of ASINs, marketplaces, and star filters, automatically expands
+them into Axesso input entries, runs the Axesso scraper, filters penalty rows,
+and pushes clean reviews to this actor's dataset.
 """
 import asyncio
 from apify import Actor
@@ -10,6 +10,39 @@ from apify import Actor
 AXESSO_ACTOR_ID = 'ZebkvH3nVOrafqr5T'
 _PENALTY_PREFIX = 'NO_REVIEWS_PENALTY'
 _PAGE_LIMIT = 50_000
+
+# Map user-facing country codes → Axesso domainCode values
+COUNTRY_TO_DOMAIN = {
+    'US': 'com',
+    'DE': 'de',
+    'FR': 'fr',
+    'ES': 'es',
+    'IT': 'it',
+    'UK': 'co.uk',
+    'JP': 'co.jp',
+    'IN': 'in',
+}
+
+ALL_STARS = ['one_star', 'two_star', 'three_star', 'four_star', 'five_star']
+
+
+def _build_axesso_entries(asins, domain_codes, star_filters, max_pages, sort_by):
+    """Expand asins × domain_codes × star_filters into Axesso input list."""
+    entries = []
+    for asin in asins:
+        for domain in domain_codes:
+            for star in star_filters:
+                entries.append({
+                    'asin': asin,
+                    'domainCode': domain,
+                    'filterByStar': star,
+                    'maxPages': max_pages,
+                    'sortBy': sort_by,
+                    'reviewerType': 'all_reviews',
+                    'formatType': 'current_format',
+                    'mediaType': 'all_contents',
+                })
+    return entries
 
 
 def _is_valid(item: dict, filter_mode: str) -> bool:
@@ -35,75 +68,77 @@ async def _fetch_all(dataset_id: str) -> list[dict]:
     return all_items
 
 
-async def _process_run(run: dict | None, label: str, filter_mode: str, out_dataset) -> int:
-    status = (run or {}).get('status', 'unknown')
-    if status != 'SUCCEEDED':
-        Actor.log.warning('[%s] run ended with status=%s — skipping', label, status)
-        return 0
-
-    dataset_id = run['defaultDatasetId']
-    Actor.log.info('[%s] fetching from dataset %s', label, dataset_id)
-
-    raw = await _fetch_all(dataset_id)
-    valid = [item for item in raw if _is_valid(item, filter_mode)]
-    Actor.log.info('[%s] %d raw → %d valid (filter=%s)', label, len(raw), len(valid), filter_mode)
-
-    if valid:
-        await out_dataset.push_data(valid)
-    return len(valid)
-
-
-async def _run_task(task_id: str, filter_mode: str, out_dataset) -> int:
-    Actor.log.info('Starting Axesso task: %s', task_id)
-    try:
-        run = await Actor.call_task(task_id=task_id)
-    except Exception as exc:
-        Actor.log.error('Task %s failed: %s', task_id, exc)
-        return 0
-    return await _process_run(run, task_id, filter_mode, out_dataset)
-
-
-async def _run_direct(axesso_input: dict, filter_mode: str, out_dataset) -> int:
-    Actor.log.info('Starting Axesso actor with custom input')
-    try:
-        run = await Actor.call(actor_id=AXESSO_ACTOR_ID, run_input=axesso_input)
-    except Exception as exc:
-        Actor.log.error('Direct Axesso call failed: %s', exc)
-        return 0
-    return await _process_run(run, 'direct', filter_mode, out_dataset)
-
-
 async def main():
     async with Actor:
         inp = await Actor.get_input() or {}
 
-        # Collect all task IDs: taskIds (list) takes priority; taskId (string) is a shorthand
-        task_ids: list[str] = [t for t in inp.get('taskIds', []) if t]
-        single = inp.get('taskId', '').strip()
-        if single and single not in task_ids:
-            task_ids.insert(0, single)
-
-        axesso_input: dict | None = inp.get('axessoInput') or None
+        asins: list[str] = [a.strip() for a in inp.get('asins', []) if a.strip()]
+        countries: list[str] = inp.get('countries', list(COUNTRY_TO_DOMAIN.keys()))
+        star_filters: list[str] = inp.get('starFilters', ALL_STARS)
+        max_pages: int = int(inp.get('maxPages', 1))
+        sort_by: str = inp.get('sortBy', 'recent')
+        max_budget_usd: float | None = inp.get('maxBudgetUsd')
         filter_mode: str = inp.get('filterMode', 'strict')
 
-        if not task_ids and not axesso_input:
-            Actor.log.error('No input. Provide taskId, taskIds, or axessoInput.')
+        if not asins:
+            Actor.log.error('No ASINs provided in input.')
             await Actor.fail(exit_code=1)
             return
 
+        # Resolve country codes → Axesso domain codes (accept both "US" and "com" style)
+        domain_codes = []
+        for c in countries:
+            c = c.strip()
+            if c in COUNTRY_TO_DOMAIN:
+                domain_codes.append(COUNTRY_TO_DOMAIN[c])
+            else:
+                domain_codes.append(c)  # already a domain code like "com", "de"
+
+        entries = _build_axesso_entries(asins, domain_codes, star_filters, max_pages, sort_by)
+        total_combos = len(entries)
+
+        Actor.log.info(
+            '%d ASIN(s) × %d domain(s) × %d star filter(s) = %d Axesso request(s)',
+            len(asins), len(domain_codes), len(star_filters), total_combos,
+        )
+        await Actor.set_status_message(
+            f'Starting Axesso run ({total_combos} request combinations)…'
+        )
+
+        axesso_input: dict = {'input': entries}
+        call_kwargs: dict = {'actor_id': AXESSO_ACTOR_ID, 'run_input': axesso_input}
+        if max_budget_usd is not None:
+            call_kwargs['memory_mbytes'] = 512
+            axesso_input['maxTotalChargeUsd'] = float(max_budget_usd)
+
+        try:
+            run = await Actor.call(**call_kwargs)
+        except Exception as exc:
+            Actor.log.error('Axesso actor call failed: %s', exc)
+            await Actor.fail(exit_code=1)
+            return
+
+        status = (run or {}).get('status', 'unknown')
+        if status != 'SUCCEEDED':
+            Actor.log.error('Axesso run ended with status=%s', status)
+            await Actor.fail(exit_code=1)
+            return
+
+        await Actor.set_status_message('Fetching results from Axesso dataset…')
+
+        raw = await _fetch_all(run['defaultDatasetId'])
+        valid = [item for item in raw if _is_valid(item, filter_mode)]
+
+        Actor.log.info(
+            '%d raw rows → %d valid reviews (filter=%s, dropped %d penalty/invalid rows)',
+            len(raw), len(valid), filter_mode, len(raw) - len(valid),
+        )
+
         out_dataset = await Actor.open_dataset()
+        if valid:
+            await out_dataset.push_data(valid)
 
-        if task_ids:
-            await Actor.set_status_message(f'Starting {len(task_ids)} Axesso task(s)…')
-            counts = await asyncio.gather(*[
-                _run_task(tid, filter_mode, out_dataset) for tid in task_ids
-            ])
-            total = sum(counts)
-        else:
-            await Actor.set_status_message('Starting Axesso actor with custom input…')
-            total = await _run_direct(axesso_input, filter_mode, out_dataset)
-
-        msg = f'Done — {total} valid review(s) in dataset'
+        msg = f'Done — {len(valid)} review(s) scraped across {len(asins)} ASIN(s) / {len(domain_codes)} marketplace(s)'
         await Actor.set_status_message(msg)
         Actor.log.info(msg)
 

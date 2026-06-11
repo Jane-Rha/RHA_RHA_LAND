@@ -1,37 +1,71 @@
 {
-  "title": "Axesso Review Wrapper",
+  "title": "Amazon Reviews Scraper (Axesso)",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
-    "taskId": {
-      "title": "Axesso Task ID (single)",
-      "description": "One Axesso saved-task ID. Use this for a single product. Ignored if taskIds is also set.",
-      "type": "string",
-      "editor": "textfield"
-    },
-    "taskIds": {
-      "title": "Axesso Task IDs (multiple)",
-      "description": "List of Axesso saved-task IDs to run in parallel (one per product). All results land in a single dataset.",
+    "asins": {
+      "title": "ASINs",
+      "description": "List of Amazon product ASINs to scrape reviews for (e.g. B0GDHXBK25).",
       "type": "array",
-      "editor": "stringList"
+      "editor": "stringList",
+      "example": ["B0GDHXBK25", "B0FVB2PF8R"]
     },
-    "axessoInput": {
-      "title": "Direct Axesso Input (JSON)",
-      "description": "Raw Axesso actor input object. Used only when no taskId / taskIds is provided — lets you call the actor directly without a saved task.",
-      "type": "object",
-      "editor": "json"
+    "countries": {
+      "title": "Marketplaces",
+      "description": "Amazon marketplaces to scrape. Accepts 2-letter country codes (US, DE, FR, ES, IT, UK, JP, IN).",
+      "type": "array",
+      "editor": "select",
+      "items": {
+        "type": "string",
+        "enum": ["US", "DE", "FR", "ES", "IT", "UK", "JP", "IN"],
+        "enumTitles": ["United States (amazon.com)", "Germany (amazon.de)", "France (amazon.fr)", "Spain (amazon.es)", "Italy (amazon.it)", "United Kingdom (amazon.co.uk)", "Japan (amazon.co.jp)", "India (amazon.in)"]
+      },
+      "default": ["US", "DE", "FR", "ES", "IT", "UK", "JP", "IN"]
+    },
+    "starFilters": {
+      "title": "Star Rating Filters",
+      "description": "Which star rating buckets to scrape. Select all five for complete coverage, or limit to 1–3 for critical review monitoring.",
+      "type": "array",
+      "editor": "select",
+      "items": {
+        "type": "string",
+        "enum": ["one_star", "two_star", "three_star", "four_star", "five_star"],
+        "enumTitles": ["1 Star", "2 Stars", "3 Stars", "4 Stars", "5 Stars"]
+      },
+      "default": ["one_star", "two_star", "three_star", "four_star", "five_star"]
+    },
+    "maxPages": {
+      "title": "Max Pages per Filter",
+      "description": "Number of review pages to fetch per ASIN / marketplace / star-filter combination. Each page contains up to 10 reviews. Default: 1 (≈10 recent reviews per combo).",
+      "type": "integer",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 50
+    },
+    "sortBy": {
+      "title": "Sort Reviews By",
+      "description": "Sort order for returned reviews.",
+      "type": "string",
+      "editor": "select",
+      "enum": ["recent", "helpful"],
+      "enumTitles": ["Most Recent", "Most Helpful"],
+      "default": "recent"
+    },
+    "maxBudgetUsd": {
+      "title": "Max Budget (USD)",
+      "description": "Optional hard cap on Axesso API costs per run (e.g. 10 = stop after $10 of Axesso charges). Leave blank for no cap.",
+      "type": "number",
+      "minimum": 0.01
     },
     "filterMode": {
       "title": "Filter Mode",
-      "description": "How to filter Axesso output rows before pushing to dataset.",
+      "description": "How to filter Axesso output before returning results. Strict (recommended): keep only rows with statusCode=200 and statusMessage=FOUND. Lenient: only strip NO_REVIEWS_PENALTY placeholder rows.",
       "type": "string",
       "editor": "select",
       "enum": ["strict", "lenient"],
-      "enumTitles": [
-        "Strict — keep only statusCode=200 + statusMessage=FOUND",
-        "Lenient — only remove NO_REVIEWS_PENALTY rows"
-      ],
+      "enumTitles": ["Strict — verified reviews only (recommended)", "Lenient — remove placeholder rows only"],
       "default": "strict"
     }
-  }
+  },
+  "required": ["asins"]
 }
