@@ -4,6 +4,8 @@
 const SHEET_NAME = 'Defect';
 const CACHE_TTL_SECONDS = 60 * 60 * 6; // 6 hours
 
+const GEMINI_MODELS = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
+
 
 /**********************************************************
  * Public custom function
@@ -117,10 +119,6 @@ ${inReasonListText}
 분석할 고객 리뷰
 """${inputText}"""`;
 
-  const url =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' +
-    apiKey;
-
   const payload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
@@ -129,21 +127,29 @@ ${inReasonListText}
     }
   };
 
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
+  let rawText = '';
+  for (const model of GEMINI_MODELS) {
+    const url =
+      'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' +
+      apiKey;
 
-  if (res.getResponseCode() !== 200) return '';
+    const res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
 
-  const json = JSON.parse(res.getContentText());
+    if (res.getResponseCode() !== 200) continue;
 
-  const rawText = (json.candidates?.[0]?.content?.parts || [])
-    .map(p => p.text || '')
-    .join('')
-    .trim();
+    const json = JSON.parse(res.getContentText());
+    rawText = (json.candidates?.[0]?.content?.parts || [])
+      .map(p => p.text || '')
+      .join('')
+      .trim();
+
+    if (rawText) break;
+  }
 
   if (!rawText) return '';
 
