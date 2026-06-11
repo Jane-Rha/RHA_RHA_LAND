@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.7.7
+// @version      2.7.8
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +57,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.7.5';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.7.8';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -320,6 +320,21 @@
       }
     }
     return '';
+  }
+
+  // Returns the actual DOM label text for the ZD field whose label starts with `labelPrefix`.
+  function resolveZdLabel_(labelPrefix) {
+    const needle = normLabel(labelPrefix);
+    for (const input of document.querySelectorAll(
+      '[data-test-id="ticket-fields-text-field"], [data-test-id="ticket-fields-date-field"]'
+    )) {
+      let node = input.parentElement;
+      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+        const lbl = node.querySelector('label');
+        if (lbl && normLabel(lbl.textContent).startsWith(needle)) return lbl.textContent.trim();
+      }
+    }
+    return null;
   }
 
   // Fetch Zendesk field options (for Device / Product Name matching)
@@ -765,7 +780,7 @@
       { label: '원산지정보',         zdId: ZD.ORIGIN_INFO,  after: originInfo,         apiVal: originInfo },
     ];
     const textRows = DOM_DEFS.map(d => ({
-      label: d.label, before: readZdInput_(d.label), after: d.after,
+      label: resolveZdLabel_(d.label) || d.label, before: readZdInput_(d.label), after: d.after,
       dom: d, // carry definition for execution phase
     }));
 
