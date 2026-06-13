@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.9
+// @version      1.1.0
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -256,7 +256,14 @@
   // CLIPBOARD PARSER (stable)
   // ---------------------------------
   function parseClipboard(txt) {
-    const t = txt
+    // The GCX Reply panel is appended to document.body end, so when the agent does
+    // Cmd+A+C on the Zendesk ticket page the panel text (including "Return ASIN B0...")
+    // appears after the ticket content. Strip it to prevent the SP-API ASIN (the
+    // originally ordered product) from overriding the ticket's replacement ASIN.
+    const gcxStart = txt.search(/(?:^|\n)GCX Reply\b/);
+    const raw = gcxStart > 0 ? txt.slice(0, gcxStart) : txt;
+
+    const t = raw
       .replace(/\r/g, '')
       .replace(/[–—]/g, '-')
       .replace(/\u00A0/g, ' ')
