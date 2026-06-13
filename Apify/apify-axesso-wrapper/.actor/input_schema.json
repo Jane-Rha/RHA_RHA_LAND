@@ -41,7 +41,7 @@
     },
     "ownerToken": {
       "title": "Your Apify API Token",
-      "description": "Required when running this actor from the Apify Store (another account's actor context). Provide your own Apify API token so the actor can call the Axesso sub-actor on your behalf. Find your token at https://console.apify.com/settings/integrations. Stored securely and never logged.",
+      "description": "Your own Apify API token. Required to authorize the Axesso sub-actor call on your behalf. Find it at https://console.apify.com/settings/integrations. Stored securely and never logged.",
       "type": "string",
       "editor": "textfield"
     }

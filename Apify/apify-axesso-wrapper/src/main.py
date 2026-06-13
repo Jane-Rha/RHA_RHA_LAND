@@ -5,9 +5,9 @@ Accepts the SAME input format as the Axesso actor directly
 passes it straight to Axesso, filters penalty/invalid rows, and pushes
 clean reviews to this actor's own dataset.
 
-ownerToken (optional input field): caller's Apify API token used for the
-Axesso sub-actor call. Required when the actor runs under limited permissions
-(e.g. when running a published Store actor from another account).
+ownerToken: caller's own Apify API token used for the Axesso sub-actor call.
+Required because Apify restricts the platform-injected token from calling
+PAY_PER_EVENT actors on behalf of other accounts.
 """
 import asyncio
 import os
@@ -33,7 +33,6 @@ def _is_valid(item: dict, filter_mode: str) -> bool:
 
 
 async def _call_axesso_and_wait(run_input: dict, token: str) -> dict:
-    """Start Axesso run via direct API call and poll until terminal state."""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f'https://api.apify.com/v2/acts/{AXESSO_ACTOR_ID}/runs',
@@ -43,7 +42,7 @@ async def _call_axesso_and_wait(run_input: dict, token: str) -> dict:
         resp.raise_for_status()
         run = resp.json()['data']
         run_id = run['id']
-        Actor.log.info('Axesso run started: %s (status=%s)', run_id, run.get('status'))
+        Actor.log.info('Axesso run started: %s', run_id)
 
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
@@ -66,9 +65,6 @@ async def main():
     async with Actor:
         inp = await Actor.get_input() or {}
 
-        # Accept either:
-        #   {"input": [...]}  — wrapped object (actor UI default)
-        #   [...]             — bare array (direct output from input-generator scripts)
         if isinstance(inp, list):
             input_entries: list[dict] = inp
             filter_mode: str = 'strict'
@@ -83,25 +79,15 @@ async def main():
         if not input_entries:
             Actor.log.error(
                 'No input entries found. Provide an "input" array of '
-                '{asin, domainCode, filterByStar, ...} objects — '
-                'same format as the Axesso actor.'
+                '{asin, domainCode, filterByStar, ...} objects.'
             )
             await Actor.fail(exit_code=1)
             return
 
-        # Token resolution order:
-        #  1. ownerToken from input (caller's own token — required for Store-actor context)
-        #  2. AXESSO_OWNER_TOKEN env var (actor-owner's token, set via Apify actor settings)
-        #  3. APIFY_TOKEN env var (works only when running the actor on your own account)
-        token = (
-            owner_token
-            or os.environ.get('AXESSO_OWNER_TOKEN')
-            or os.environ.get('APIFY_TOKEN', '')
-        )
+        token = owner_token or os.environ.get('APIFY_TOKEN', '')
         if not token:
             Actor.log.error(
-                'No usable API token found. '
-                'Provide "ownerToken" in the input with your Apify API token.'
+                'No API token found. Provide "ownerToken" in the input with your Apify API token.'
             )
             await Actor.fail(exit_code=1)
             return
@@ -122,7 +108,7 @@ async def main():
             await Actor.fail(exit_code=1)
             return
         except Exception as exc:
-            Actor.log.error('Axesso actor call failed: %s', exc)
+            Actor.log.error('Axesso call failed: %s', exc)
             await Actor.fail(exit_code=1)
             return
 
@@ -149,7 +135,7 @@ async def main():
         valid = [item for item in raw if _is_valid(item, filter_mode)]
 
         Actor.log.info(
-            '%d raw rows → %d valid reviews (filter=%s, dropped %d rows)',
+            '%d raw rows → %d valid reviews (filter=%s, dropped %d)',
             len(raw), len(valid), filter_mode, len(raw) - len(valid),
         )
 
