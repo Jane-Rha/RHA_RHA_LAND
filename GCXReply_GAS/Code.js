@@ -123,7 +123,7 @@ function getLwaToken_(cred) {
 
   const d = JSON.parse(resp.getContentText());
   if (!d.access_token) throw new Error('LWA failed: ' + resp.getContentText());
-  cache.put(cacheKey, d.access_token, Math.min(d.expires_in - 60, 240));
+  cache.put(cacheKey, d.access_token, Math.min(d.expires_in - 180, 180));
   return d.access_token;
 }
 
@@ -277,14 +277,27 @@ function fetchBuyerPurchaseStats_(endpoint, region, cred, salesChannel, buyerEma
 
 // ── Fetch order + items + address + buyer ─────────────────────────────────────
 function fetchOrderData_(orderId) {
+  const regionErrors = [];
   for (const { endpoint, region, cred } of REGIONS) {
     let r;
     try { r = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}`); }
-    catch (e) { continue; } // missing/invalid cred for this region — skip
-    if (r.status !== 200) continue;
+    catch (e) { regionErrors.push(`${cred}:LWA(${e.message})`); continue; }
+
+    // 403 + "expired" → cached LWA token went stale; clear cache and retry once
+    if (r.status === 403 && r.body.includes('expired')) {
+      CacheService.getScriptCache().remove('lwa_' + cred);
+      try { r = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}`); }
+      catch (e) { regionErrors.push(`${cred}:LWA-retry(${e.message})`); continue; }
+    }
+
+    if (r.status !== 200) {
+      const detail = (r.status === 403 && r.body.includes('expired')) ? '(auth-revoked)' : '';
+      regionErrors.push(`${cred}:${r.status}${detail}`);
+      continue;
+    }
 
     const order  = JSON.parse(r.body).payload || {};
-    if (!order.AmazonOrderId) continue; // 200 but error body (wrong region) — try next
+    if (!order.AmazonOrderId) { regionErrors.push(`${cred}:200-noId`); continue; }
 
     const rdtResult = getRdt_(endpoint, region, cred, orderId);
     const rdtToken  = rdtResult.token || undefined;
@@ -310,7 +323,7 @@ function fetchOrderData_(orderId) {
       region,
     };
   }
-  throw new Error('Order not found in any region');
+  throw new Error('Order not found — ' + regionErrors.join(' | '));
 }
 
 // ── TEMP: clear LWA token cache ───────────────────────────────────────────────
