@@ -535,12 +535,35 @@ function updateFeedbackSheet() {
     [31,
       '【Before】 v2.7.3 clearAllZdFields_()가 모든 티켓 이동 시 무조건 호출 → Zendesk가 저장한 필드값까지 초기화됨\n【After v2.7.7】 Auto-Fill 확인 후에만 _gcrFilledThisTicket = true 설정 → 해당 플래그 true일 때만 필드 초기화. Auto-Fill 미사용 티켓은 필드값 보존\n✅ 임의 티켓에서 Auto-Fill 없이 이동 후 복귀 시 필드 정상 유지 확인',
       'v2.7.7'],
+    [33,
+      '【Before】 SC SellerSKU "PE2213IN 35w"(공백 포함 모델명)이 기존 숫자 바코드 필터만 적용 → 문의SKU 필드에 그대로 입력됨\n【After v2.8.2】 SellerSKU에 공백 포함 시 자동 제외 필터 추가 → 제품 정보 시트 SKU(ACH06437) 우선 사용\n✅ 테스트 티켓: #1000150015 (ASIN B0CG8QTWP2)',
+      'v2.8.2'],
+    [34,
+      '【Before】 동일 원인 → SC SellerSKU "PE2212IN 65w"가 문의SKU 필드에 입력됨\n【After v2.8.2】 동일 수정 사항 적용\n✅ 테스트 티켓: #1000150108, #1000150207 (ASIN B0DKSNXLCT)',
+      'v2.8.2'],
+    [35,
+      '【Before】 제품 정보 시트 AGL07930 모델명이 "Glas.tR EZ Fit"으로만 등록 → "Glas.tR EZ Fit FC"로 오매칭됨\n【After v2.8.2】 시트 AGL07930 모델명 → "Glas.tR EZ Fit Anti Reflection"으로 수정 (fixProductSheetData 실행)\n✅ 테스트 티켓: #1000150171 (ASIN B0D84Z9693)',
+      'v2.8.2'],
+    [36,
+      '【Before】 SC orders-api SellerSKU 미확보(세션 만료) 또는 ACS10046에 PAN 미포함 → PAN EU 미감지 → FBA 선택\n【현황】 v2.7.6 병렬 SC 조회 적용 중 — SC 세션 유지 시 자동 감지 가능. SellerSKU 직접 확인 후 추가 조치 예정\n📋 티켓: #1000150172 (ASIN B0FD22YW2J)',
+      null],
+    [37,
+      '【Before】 v2.7.7 fixProductSheetData AGL07928 수정이 시트에 미적용(함수 미실행) → 동일 오매칭 재발\n【After v2.8.2】 fixProductSheetData 재실행 → AGL07928 모델명 "Glas.tR EZ Fit Slim" 정상 적용\n✅ 테스트 티켓: #1000150312 (ASIN B0D84YX465)',
+      'v2.7.7'],
+    [38,
+      '【Before】 동일 원인 → SC SellerSKU "PE2304IN 45w"가 문의SKU 필드에 입력됨\n【After v2.8.2】 동일 수정 사항 적용 (공백 포함 SellerSKU 필터)\n✅ 테스트 티켓: #1000150368 (ASIN B0DQ14CVX1)',
+      'v2.8.2'],
+    [39,
+      '【Before】 인도(Amazon.in) SP-API LWA 토큰 만료 시 예외 미처리 → 주문 조회 전체 실패\n【After GAS 2026-06-15】 지역별 LWA 예외 개별 catch, 403+만료 시 캐시 자동 삭제 후 1회 재시도\n📋 테스트 티켓: #1000150413',
+      null],
   ];
 
   UPDATES.forEach(([row, feedback, build]) => {
     sheet.getRange(row, F).setValue(feedback);
     if (build) sheet.getRange(row, J).setValue(build);
   });
+
+  sheet.getRange(35, 2).setValue('Product name'); // B35 was "Purchase Date" — incorrect category
 
   Logger.log('Done — updated ' + UPDATES.length + ' rows in GCX Reply 피드백');
 }
@@ -560,6 +583,7 @@ function fixProductSheetData() {
     'AGL07929': ['모델명',  'Glas.tR EZ Fit Privacy'],
     'AGL07928': ['모델명',  'Glas.tR EZ Fit Slim'],
     'AGL10819': ['모델명',  'Glas.tR EZ Fit Anti-Glare'],
+    'AGL07930': ['모델명',  'Glas.tR EZ Fit Anti Reflection'],
     'AMP09837': ['대분류',  '차량용 거치대/스탠드'],
   };
 
