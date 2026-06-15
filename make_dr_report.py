@@ -3,6 +3,7 @@ DR() Gemini API 토큰 소비량 분석 보고서 (수정판)
 - 실제 1-3점 행 수 반영: GalaxyS26=1,267행, 유지훈P=1,635행 (사용자 확인)
 - GDrive MCP가 시트를 112행에서 잘라내므로 이전 수치는 모두 과소 산정
 - 전체 추정: gemini-3.5-flash 요금 기준 / 한국어
+- 오버헤드 x1.5 반영: 테스트/캐시 점검/에러 핸들링/개발 목적 소비 포함
 """
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
@@ -77,6 +78,10 @@ OUT_TOK    = 4      # 출력 토큰
 
 CPC = (IN_TOK * INP_PRICE + OUT_TOK * OUT_PRICE) / 1_000_000   # 호출당 비용
 
+# ── 오버헤드 배율 ─────────────────────────────────────────────────────────────
+# 테스트 / 캐시 점검 / 에러 핸들링 / 개발 목적 소비 포함 → 순수 리뷰 호출의 1.5배
+OVERHEAD = 1.5
+
 # ── 실제 확인된 월별 속도 ─────────────────────────────────────────────────────
 # Galaxy S26   : 확인 1,267행 / 3.5개월 (3월9일~6월15일) → 약 362행/월
 # 유지훈P      : 확인 1,635행 / 5.5개월 (2026년 전체) → 약 297행/월
@@ -149,6 +154,8 @@ ap(doc, '작성일: 2026년 6월 15일  |  분석 기간: 2025 ~ 2026년  |  작
 ap(doc, '※ 전체 비용 추정: gemini-3.5-flash 기준 ($1.50/백만 입력토큰, $9.00/백만 출력토큰)',
    sz=10, col=RED, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, sa=2)
 ap(doc, '※ 실제 행 수 기준: Galaxy S26 1-3점 1,267행, 유지훈P 1-3점 1,635행 (확인된 실측치)',
+   sz=10, col=RED, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, sa=2)
+ap(doc, '※ 오버헤드 ×1.5 적용: 테스트·캐시 점검·에러 핸들링·개발 목적 소비 포함 (순수 리뷰 호출의 1.5배)',
    sz=10, col=RED, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, sa=8)
 doc.add_paragraph()
 
@@ -223,19 +230,20 @@ ap(doc, '본 보고서의 모든 비용은 gemini-3.5-flash 요금 기준으로 
 
 cpr = CPC * 0.90  # 키워드 우회 10% 제외
 table(doc,
-    ['모델', '구분', '$/백만 입력', '$/백만 출력', '호출당 비용', '리뷰당 비용 (90%)'],
+    ['모델', '구분', '$/백만 입력', '$/백만 출력', '호출당 기본 비용', '×1.5 오버헤드 적용', '리뷰당 비용 (90%×1.5)'],
     [
-        ['gemini-3.5-flash',       '비용 산출 기준', '$1.50', '$9.00', f'${CPC:.6f}', f'${cpr:.6f}'],
+        ['gemini-3.5-flash',       '비용 산출 기준', '$1.50', '$9.00',
+         f'${CPC:.6f}', f'${CPC*OVERHEAD:.6f}', f'${cpr*OVERHEAD:.6f}'],
         ['gemini-3-flash-preview', '구 폴백 (참고)', '$0.25', '$1.50',
-         f'${(IN_TOK*0.25+OUT_TOK*1.50)/1e6:.6f}', '—'],
+         f'${(IN_TOK*0.25+OUT_TOK*1.50)/1e6:.6f}', '—', '—'],
         ['gemini-3.1-flash-lite',  '현재 실 운영 모델 (참고)', '$0.25', '$1.50',
-         f'${(IN_TOK*0.25+OUT_TOK*1.50)/1e6:.6f}', '—'],
+         f'${(IN_TOK*0.25+OUT_TOK*1.50)/1e6:.6f}', '—', '—'],
         ['gemini-2.5-flash-lite',  '현재 폴백 (참고)', '$0.10', '$0.40',
-         f'${(IN_TOK*0.10+OUT_TOK*0.40)/1e6:.6f}', '—'],
+         f'${(IN_TOK*0.10+OUT_TOK*0.40)/1e6:.6f}', '—', '—'],
     ])
 doc.add_paragraph()
 ap(doc,
-   f'gemini-3.5-flash 기준: 호출 1회 = ${CPC:.6f}  (입력 {IN_TOK:,}토큰 × $1.50/백만 + 출력 {OUT_TOK}토큰 × $9.00/백만)\n'
+   f'gemini-3.5-flash 기준: 호출 1회 기본 비용 = ${CPC:.6f}  →  ×1.5 오버헤드 적용 후 = ${CPC*OVERHEAD:.6f}\n'
    f'현재 실제 모델(gemini-3.1-flash-lite) 대비 6배 비싼 기준으로 보수적 상한선 산정.',
    sz=10, col=RED, bold=True, sa=6)
 
@@ -309,31 +317,35 @@ bullet(doc, '† iPhone 18 출시 예상 2026년 9월, 모니터링 9월 중반~
 bullet(doc, '정규 시트 (SDA/Auto_Acc/Power_Acc/전략폰): GDrive 익스포트 날짜 범위 기반 속도 산출')
 
 # ══ §6 연도별 비용 요약 ════════════════════════════════════════════════════════
-heading(doc, '6. 연도별 비용 요약 (gemini-3.5-flash 기준)')
+heading(doc, '6. 연도별 비용 요약 (gemini-3.5-flash 기준, 오버헤드 ×1.5 포함)')
 grand = cost25 + cost26
+grand_oh = grand * OVERHEAD
 table(doc,
-    ['구분', 'DR() 호출 수', '입력 토큰', '총 토큰', '예상 비용 (USD)', '비고'],
+    ['구분', 'DR() 호출 수', '기본 비용 (USD)', '×1.5 후 최종 비용 (USD)', '비고'],
     [
         ['2025년 전체 (가상 추정)',
-         f"{tc25:,}", f"{tc25*IN_TOK:,}", f"{tc25*(IN_TOK+OUT_TOK):,}", f"${cost25:.2f}",
+         f"{tc25:,}", f"${cost25:.2f}", f"${cost25*OVERHEAD:.2f}",
          'TQ 사용 기간 — 가상 추정'],
         ['2026년 전체 (실제+예상)',
-         f"{tc26:,}", f"{tc26*IN_TOK:,}", f"{tc26*(IN_TOK+OUT_TOK):,}", f"${cost26:.2f}",
+         f"{tc26:,}", f"${cost26:.2f}", f"${cost26*OVERHEAD:.2f}",
          '실확인 2종 + 예상 포함'],
         ['2025~2026 총합계',
-         f"{tc25+tc26:,}", f"{(tc25+tc26)*IN_TOK:,}",
-         f"{(tc25+tc26)*(IN_TOK+OUT_TOK):,}", f"${grand:.2f}", ''],
+         f"{tc25+tc26:,}", f"${grand:.2f}", f"${grand_oh:.2f}",
+         '테스트·캐시점검·에러핸들링·개발 포함'],
     ], bold_last=True)
 doc.add_paragraph()
-ap(doc, f'gemini-3.5-flash 기준 총 예상 비용: USD ${grand:.2f}  |  총 토큰: {(tc25+tc26)*(IN_TOK+OUT_TOK):,}개',
+ap(doc,
+   f'기본 비용 ${grand:.2f}  ×  오버헤드 1.5  =  최종 예상 비용 USD ${grand_oh:.2f}',
    bold=True, sz=13, col=DARK, sa=4, align=WD_ALIGN_PARAGRAPH.CENTER)
-ap(doc, f'참고 — 현재 실제 운영 모델(gemini-3.1-flash-lite, $0.25/백만) 기준 시 약 ${grand/6:.2f} 예상 (83% 절감)',
+ap(doc, f'참고 — 현재 실제 운영 모델(gemini-3.1-flash-lite, $0.25/백만) 기준 시 약 ${grand_oh/6:.2f} 예상 (83% 절감)',
    sz=10, col=GRAY, sa=6, align=WD_ALIGN_PARAGRAPH.CENTER)
 
 # ══ §7 시리즈별 누적 현황 ══════════════════════════════════════════════════════
 heading(doc, '7. 시리즈 / 시트별 누적 DR() 호출 현황')
 def sr(name, typ, period, rows, note=''):
-    return [name, typ, period, f"{rows:,}", f"{int(rows*0.9):,}", f"{rows*IN_TOK:,}", f"${rows*CPC:.3f}", note]
+    base = rows * CPC
+    return [name, typ, period, f"{rows:,}", f"{int(rows*0.9):,}", f"{rows*IN_TOK:,}",
+            f"${base:.3f}", f"${base*OVERHEAD:.3f}", note]
 
 confirmed_s26  = 1267
 confirmed_yjh  = 1635
@@ -363,8 +375,11 @@ all_r   = sum(int(r[3].replace(',','')) for r in series)
 all_c   = sum(int(r[4].replace(',','')) for r in series)
 all_t   = sum(int(r[5].replace(',','')) for r in series)
 all_co  = sum(float(r[6].replace('$','')) for r in series)
-series.append(['합계 (2025~2026)', '—', '—', f"{all_r:,}", f"{all_c:,}", f"{all_t:,}", f"${all_co:.2f}", ''])
-table(doc, ['시리즈/시트','유형','모니터링 기간','전체 행 수','DR() 호출 (90%기준)','입력 토큰','예상 비용','비고'],
+all_oh  = sum(float(r[7].replace('$','')) for r in series)
+series.append(['합계 (2025~2026)', '—', '—', f"{all_r:,}", f"{all_c:,}", f"{all_t:,}",
+               f"${all_co:.2f}", f"${all_oh:.2f}", ''])
+table(doc, ['시리즈/시트','유형','모니터링 기간','전체 행 수','DR() 호출 (90%기준)',
+            '입력 토큰','기본 비용','×1.5 후 비용','비고'],
       series, bold_last=True)
 
 # ══ §8 정규 시트 분석 ═════════════════════════════════════════════════════════
@@ -389,13 +404,18 @@ table(doc,
 doc.add_paragraph()
 bullet(doc, '⚠ SDA, Auto_Acc는 익스포트가 최초 행(가장 오래된 데이터)부터 잘리므로 실제 총 행 수는 더 많을 수 있음', col=RED)
 bullet(doc, 'Power_Acc, 전략폰은 최신 날짜까지 데이터가 보이므로 익스포트가 완전하거나 거의 완전한 것으로 추정')
-bullet(doc, 'DR()가 배포될 경우 기존 누적 행(추정 ~1,060행)에 대한 일괄 처리 비용 추가 발생 → 약 $' + f"{1060*CPC:.2f}")
+bullet(doc, 'DR()가 배포될 경우 기존 누적 행(추정 ~1,060행)에 대한 일괄 처리 비용 추가 발생 → '
+       f'기본 ${1060*CPC:.2f}, 오버헤드 ×1.5 후 ${1060*CPC*OVERHEAD:.2f}')
 
 # ══ §9 주요 가정 및 유의사항 ═══════════════════════════════════════════════════
 heading(doc, '9. 주요 가정 및 유의사항')
 for t,b in [
     ('비용 산출 기준', f'gemini-3.5-flash ($1.50/백만 입력, $9.00/백만 출력) 기준으로 보수적 상한선 산정. '
-     f'현재 실 운영 모델(gemini-3.1-flash-lite)로는 약 $1.{round(grand/6,2):.2f} 예상, 약 83% 절감 가능.'),
+     f'현재 실 운영 모델(gemini-3.1-flash-lite)로는 약 ${grand_oh/6:.2f} 예상, 약 83% 절감 가능.'),
+    ('오버헤드 ×1.5', '순수 리뷰 분류 호출 외에 테스트(testDRBatch 실행), '
+     '캐시 무효화 후 재확인, 에러 핸들링 재시도, 개발·QA 목적 수동 호출 등이 추가로 발생함. '
+     '이를 반영해 기본 비용에 1.5배 오버헤드 계수를 적용함. '
+     '실제 오버헤드는 개발 주기·배포 빈도에 따라 다를 수 있음.'),
     ('실측 행 수',     'Galaxy S26 1-3점: 1,267행, 유지훈P 1-3점: 1,635행은 사용자가 실제 스프레드시트에서 확인한 수치. '
      'GDrive MCP는 시트당 최대 112행을 내보내므로 나머지 시트의 행 수는 과소 산정될 수 있음.'),
     ('월간 속도 기준', 'S26 362행/월, 유지훈P 297행/월은 실확인치로 산출 (총 행 수 ÷ 모니터링 기간). '
@@ -416,30 +436,32 @@ for t,b in [
     r2=p.add_run(b); r2.font.size=Pt(10)
 
 # ══ §10 총괄 요약 ══════════════════════════════════════════════════════════════
-heading(doc, '10. 총괄 요약')
+heading(doc, '10. 총괄 요약 (오버헤드 ×1.5 포함 최종)')
 table(doc,
-    ['구분','DR() 호출 수','입력 토큰','총 토큰','예상 비용 (USD)','비고'],
+    ['구분','DR() 호출 수','기본 비용 (USD)','×1.5 후 최종 비용 (USD)','비고'],
     [
-        ['2025년 (가상 추정)',   f"{tc25:,}", f"{tc25*IN_TOK:,}",
-         f"{tc25*(IN_TOK+OUT_TOK):,}", f"${cost25:.2f}", '3.5-flash 기준, TQ 기간 가상'],
-        ['2026년 (실제+예상)',   f"{tc26:,}", f"{tc26*IN_TOK:,}",
-         f"{tc26*(IN_TOK+OUT_TOK):,}", f"${cost26:.2f}", '실측 2종 + 예상 포함'],
-        ['2025~2026 총합계',     f"{tc25+tc26:,}", f"{(tc25+tc26)*IN_TOK:,}",
-         f"{(tc25+tc26)*(IN_TOK+OUT_TOK):,}", f"${grand:.2f}", ''],
+        ['2025년 (가상 추정)',
+         f"{tc25:,}", f"${cost25:.2f}", f"${cost25*OVERHEAD:.2f}", '3.5-flash 기준, TQ 기간 가상'],
+        ['2026년 (실제+예상)',
+         f"{tc26:,}", f"${cost26:.2f}", f"${cost26*OVERHEAD:.2f}", '실측 2종 + 예상 포함'],
+        ['2025~2026 총합계',
+         f"{tc25+tc26:,}", f"${grand:.2f}", f"${grand_oh:.2f}", '테스트·개발 오버헤드 포함'],
     ], bold_last=True)
 
 doc.add_paragraph()
-ap(doc, f'gemini-3.5-flash 기준 총 예상 Gemini API 비용: USD ${grand:.2f}',
+ap(doc,
+   f'최종 예상 Gemini API 비용 (오버헤드 포함): USD ${grand_oh:.2f}',
    bold=True, sz=14, col=DARK, sa=2, align=WD_ALIGN_PARAGRAPH.CENTER)
-ap(doc, f'총 토큰: {(tc25+tc26)*(IN_TOK+OUT_TOK):,}개  |  DR() 총 호출: {tc25+tc26:,}건',
+ap(doc,
+   f'기본 비용 ${grand:.2f}  ×  1.5  =  ${grand_oh:.2f}  |  DR() 총 호출: {tc25+tc26:,}건',
    sz=11, col=GRAY, sa=4, align=WD_ALIGN_PARAGRAPH.CENTER)
 
 ap(doc,
-   f'• 호출 1회당: ${CPC:.6f}  (입력 {IN_TOK:,}tok × $1.50/백만 + 출력 {OUT_TOK}tok × $9.00/백만)\n'
-   f'• 리뷰 1건당: ${cpr:.6f}  (키워드 우회 10% 제외)\n'
-   f'• 정규 시트 기준 월간 비용: ${REG_PM*CPC:.4f}/월 (60건/월 기준)\n'
-   f'• 유지훈P + 정규 시트 상시 운영 월간 비용: ${(YJH_PM+REG_PM)*CPC:.4f}/월\n'
-   f'• 참고 — 현재 실제 모델(gemini-3.1-flash-lite) 기준 시 약 ${grand/6:.2f} (83% 절감)',
+   f'• 호출 1회당 기본: ${CPC:.6f}  →  오버헤드 ×1.5 후: ${CPC*OVERHEAD:.6f}\n'
+   f'• 리뷰 1건당 (키워드 10% 우회 + 오버헤드): ${cpr*OVERHEAD:.6f}\n'
+   f'• 정규 시트 월간 비용 (×1.5): ${REG_PM*CPC*OVERHEAD:.4f}/월 (60건/월 기준)\n'
+   f'• 유지훈P + 정규 시트 상시 운영 월간 비용 (×1.5): ${(YJH_PM+REG_PM)*CPC*OVERHEAD:.4f}/월\n'
+   f'• 참고 — 현재 실제 모델(gemini-3.1-flash-lite) 기준 오버헤드 포함 시 약 ${grand_oh/6:.2f} (83% 절감)',
    sz=10, sa=6)
 
 ap(doc,
