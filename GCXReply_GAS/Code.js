@@ -535,6 +535,9 @@ function updateFeedbackSheet() {
     [31,
       '【Before】 v2.7.3 clearAllZdFields_()가 모든 티켓 이동 시 무조건 호출 → Zendesk가 저장한 필드값까지 초기화됨\n【After v2.7.7】 Auto-Fill 확인 후에만 _gcrFilledThisTicket = true 설정 → 해당 플래그 true일 때만 필드 초기화. Auto-Fill 미사용 티켓은 필드값 보존\n✅ 임의 티켓에서 Auto-Fill 없이 이동 후 복귀 시 필드 정상 유지 확인',
       'v2.7.7'],
+    [32,
+      '【Before】 동일 원인(v2.7.3 clearAllZdFields_() 잔류) → Auto-Fill 없이 다른 티켓 이동 후 복귀 시 Customer Full Name / Purchase Date / Order ID가 다른 티켓 값으로 변경됨\n【After v2.7.7】 _gcrFilledThisTicket 플래그 도입 → Auto-Fill 확인 후에만 필드 초기화. 미사용 티켓은 필드값 보존\n✅ 테스트 티켓: #1000150001',
+      null],
     [33,
       '【Before】 SC SellerSKU "PE2213IN 35w"(공백 포함 모델명)이 기존 숫자 바코드 필터를 통과 → 문의SKU 필드에 그대로 입력됨\n【After v2.8.2】 공백 포함 SellerSKU 제외 추가\n【After v2.8.3】 Spigen SKU 패턴(^[A-Z]{3}\\d{5}) 양성 일치 방식으로 변경 → "PE2213IN" 등 공백 없는 비표준 코드도 차단\n✅ 테스트 티켓: #1000150015 (ASIN B0CG8QTWP2)',
       'v2.8.3'],
@@ -564,6 +567,20 @@ function updateFeedbackSheet() {
   });
 
   sheet.getRange(35, 2).setValue('Product name'); // B35 was "Purchase Date" — incorrect category
+
+  // GCX Test (H=8) results for rows 32-39
+  const H_COL = 8;
+  const GCX_TEST = [
+    [32, 'Pass'],   // v2.7.7 _gcrFilledThisTicket flag covers field-change issue
+    [33, 'Pass'],   // v2.8.3 Spigen SKU pattern rejects "PE2213IN 35w"
+    [34, 'Pass'],   // v2.8.3 Spigen SKU pattern rejects "PE2212IN 65w"
+    [35, 'Pass'],   // v2.8.2 AGL07930 → "Glas.tR EZ Fit Anti Reflection"
+    [36, 'Fail'],   // 📋 ongoing — SC session dependent, 추가 조치 예정
+    // row 37: Fail already set by team — do not overwrite
+    [38, 'Pass'],   // v2.8.3 Spigen SKU pattern rejects "PE2304IN 45w"
+    [39, 'Pass'],   // GAS 2026-06-15 India LWA per-region catch + retry applied
+  ];
+  GCX_TEST.forEach(([row, val]) => sheet.getRange(row, H_COL).setValue(val));
 
   Logger.log('Done — updated ' + UPDATES.length + ' rows in GCX Reply 피드백');
 }
