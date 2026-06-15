@@ -326,20 +326,6 @@ function fetchOrderData_(orderId) {
   throw new Error('Order not found — ' + regionErrors.join(' | '));
 }
 
-// ── TEMP: clear LWA token cache ───────────────────────────────────────────────
-function clearLwaCache() {
-  CacheService.getScriptCache().removeAll(['lwa_main', 'lwa_jp', 'lwa_in']);
-  Logger.log('LWA cache cleared');
-}
-
-// ── TEMP: update Spigen EU refresh token ──────────────────────────────────────
-function updateEuToken() {
-  PropertiesService.getScriptProperties().setProperty(
-    'LWA_REFRESH_TOKEN',
-    'Atzr|IwEBIGcgTUaxMvFbotDXS95u_s_WdPkYbpaxAnk-k2rDILGYcikUgLb368CRqPYzBhr3hz_SPcfsOU2SUqP3UMIL7vhOzTD7E2Nm0MYHDivTzY4hHFNIXIxbYLRTrQ3qfi6ftpLh5dX0zlC-u5hQqeEXS-oyC1s8VffzWx4NJO7_Nex-BbrXVSNDWnkly0_sCqfzqMpBQ1cNHxHugFxcB4PxRi206mIlo5kE4vQplx_IIS4Q7R-OGzgpD4GRGaNnyTFYsywJKGb0o1MqUAAFYFOFnJhWyE5XbhzUnYr1plIaNV8Sjyq0Y_yc9LIe6eRzyzmMR6AwvR1VuLlWTdJKCFpeog-Z'
-  );
-  Logger.log('LWA_REFRESH_TOKEN updated');
-}
 
 // ── ASIN marketplace availability (market spreadsheet) ───────────────────────
 // Returns array of country codes (e.g. ['DE','UK']) where the ASIN is selling.
@@ -469,7 +455,6 @@ function lookupAsinAll_(asin) {
   return { product, productSource, allSources: { sheet1: sheet1 || null, sheet2: sheet2 || null } };
 }
 
-// ─── TEMP: one-time feedback sheet updater — run after each release ──────────
 function updateFeedbackSheet() {
   const ss    = SpreadsheetApp.openById('1v0cTiDvFM060e3pSqLHMhAiIBEsP-6gMDH_Q5eM7Yjo');
   const sheet = ss.getSheetByName('GCX Reply 피드백');
@@ -560,7 +545,6 @@ function updateFeedbackSheet() {
   Logger.log('Done — updated ' + UPDATES.length + ' rows in GCX Reply 피드백');
 }
 
-// ─── TEMP: one-time product sheet data fixer — run after each release ─────────
 function fixProductSheetData() {
   const ss    = SpreadsheetApp.openById('1fx9K4r2T9SeZK076zy9kMHoLzAKDgmlRp-C2VtnTKVo');
   const sheet = ss.getSheetByName('Data');
