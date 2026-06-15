@@ -278,7 +278,9 @@ function fetchBuyerPurchaseStats_(endpoint, region, cred, salesChannel, buyerEma
 // ── Fetch order + items + address + buyer ─────────────────────────────────────
 function fetchOrderData_(orderId) {
   for (const { endpoint, region, cred } of REGIONS) {
-    const r = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}`);
+    let r;
+    try { r = spApiGet_(endpoint, region, cred, `/orders/v0/orders/${orderId}`); }
+    catch (e) { continue; } // missing/invalid cred for this region — skip
     if (r.status !== 200) continue;
 
     const order  = JSON.parse(r.body).payload || {};
