@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.1.0
+// @version      1.1.1
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -586,14 +586,18 @@ async function fetchOrderIdByEmail(email) {
         return;
       }
 
-      // Parse fulfillable count from each result row
+      // Parse fulfillable count from each result row; exclude amzn.* internal SKUs
       const entries = components.map(comp => {
         const qtyEl = comp.querySelector('.search-result-component-quantity');
         const text = (qtyEl ? qtyEl.textContent : '').trim();
         const m = text.match(/([\d,]+)\s+fulfillable/i);
         const count = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
         return { count, comp };
-      });
+      }).filter(({ comp }) => !/\bamzn[.\-]/i.test(comp.textContent || ''));
+      if (!entries.length) {
+        if (attempts > 60) { clearInterval(timer); LOG('autoSelectBestSku: only amzn.* SKUs found, nothing to select.'); }
+        return;
+      }
       entries.sort((a, b) => b.count - a.count);
       const best = entries[0];
 
