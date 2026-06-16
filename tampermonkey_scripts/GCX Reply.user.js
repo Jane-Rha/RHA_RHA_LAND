@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.4
+// @version      2.8.5
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +57,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.4';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.5';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -1888,7 +1888,7 @@
   function fetchOrder(orderId, _retries) {
     _retries = _retries || 0;
     const _session = _panelSession;
-    setStatus('Fetching order data…');
+    setStatus('Fetching order data…', true);
     if (!_retries) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
@@ -1902,7 +1902,7 @@
         if (res.responseText.trimStart().startsWith('<')) {
           if (_retries < 2) {
             logStep_(`GAS not ready — retry ${_retries + 1}/2…`);
-            setStatus('Retrying…');
+            setStatus('Retrying…', true);
             setTimeout(() => fetchOrder(orderId, _retries + 1), 2000);
             return;
           }
@@ -2032,11 +2032,15 @@
     });
   }
 
-  function setStatus(msg) {
+  const LOADING_GIF = 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Loading_icon.gif?_=20151024034921';
+  function setStatus(msg, isLoading = false) {
+    const html = isLoading
+      ? `<img src="${LOADING_GIF}" style="width:14px;height:14px;vertical-align:middle;margin-right:5px;">${esc(msg)}`
+      : esc(msg);
     const el = document.getElementById('sp-status');
-    if (el) { el.textContent = msg; return; }
+    if (el) { el.innerHTML = html; return; }
     const result = document.getElementById('sp-result');
-    if (result) result.innerHTML = `<div id="sp-status">${esc(msg)}</div>`;
+    if (result) result.innerHTML = `<div id="sp-status">${html}</div>`;
   }
 
   function logStep_(msg) {
