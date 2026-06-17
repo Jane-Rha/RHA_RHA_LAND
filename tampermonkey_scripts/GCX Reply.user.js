@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.5
+// @version      2.8.6
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +57,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.5';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.6';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -2361,7 +2361,7 @@
           lastTicketId = newId;
           resetPanel();
           clearTimeout(navTimer);
-          navTimer = setTimeout(autoDetectAll, 2500);
+          navTimer = setTimeout(autoDetectAll, 1500);
         }
       } else {
         // Left ticket pages (filters, views, etc.) — always collapse
@@ -2387,7 +2387,7 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    if (isTicketPage_()) setTimeout(autoDetectAll, 2500);
+    if (isTicketPage_()) setTimeout(autoDetectAll, 1500);
   }
 
   // 국가 코드 → Amazon MCF Seller Central URL
