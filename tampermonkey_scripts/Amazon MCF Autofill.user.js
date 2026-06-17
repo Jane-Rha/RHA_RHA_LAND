@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.2.0
+// @version      1.2.1
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -537,11 +537,13 @@ async function fetchOrderIdByEmail(email) {
   // ---------------------------------
   // ORDER ID SETTER
   // ---------------------------------
+  const _isOrderIdLabel = (lbl) =>
+    lbl.includes('order id') || lbl.includes('merchant order id') || lbl.includes('주문 id');
+
   function isOrderIdFilled() {
-    const kat = [...document.querySelectorAll('kat-input')].find(k => {
-      const lbl = (k.getAttribute('label') || '').trim().toLowerCase();
-      return lbl.includes('order id') || lbl.includes('merchant order id');
-    });
+    const kat = [...document.querySelectorAll('kat-input')].find(k =>
+      _isOrderIdLabel((k.getAttribute('label') || '').trim().toLowerCase())
+    );
     if (kat && (kat.value || kat.getAttribute('value'))) return true;
 
     const inner = document.querySelector(
@@ -555,10 +557,9 @@ async function fetchOrderIdByEmail(email) {
   function setOrderIdInput(v) {
     if (!v) return false;
 
-    const kat = [...document.querySelectorAll('kat-input')].find(k => {
-      const lbl = (k.getAttribute('label') || '').trim().toLowerCase();
-      return lbl.includes('order id') || lbl.includes('merchant order id');
-    });
+    const kat = [...document.querySelectorAll('kat-input')].find(k =>
+      _isOrderIdLabel((k.getAttribute('label') || '').trim().toLowerCase())
+    );
 
     if (kat) return setKatInput(kat, v);
 
