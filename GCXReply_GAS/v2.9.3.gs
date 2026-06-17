@@ -2,7 +2,7 @@
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
 
-// @version      2.9.2
+// @version      2.9.3
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -58,7 +58,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.2';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.3';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -1365,7 +1365,7 @@
       overflow: hidden;
       /* Fill + gradient border via background-clip — no pseudo-elements    */
       background:
-        linear-gradient(rgba(255,255,255,0.32), rgba(255,255,255,0.32)) padding-box,
+        linear-gradient(rgba(255,255,255,0.14), rgba(255,255,255,0.14)) padding-box,
         linear-gradient(
           155deg,
           rgba(255,255,255,0.92) 0%,
