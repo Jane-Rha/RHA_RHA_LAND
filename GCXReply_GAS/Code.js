@@ -568,8 +568,11 @@ function callGeminiDR_(text, enrichedList, model) {
       Logger.log(`callGeminiDR [${model}] HTTP ${res.getResponseCode()}: ${res.getContentText().slice(0, 200)}`);
       return '';
     }
-    const json = JSON.parse(res.getContentText());
-    return (json.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+    const json  = JSON.parse(res.getContentText());
+    const parts = (json.candidates?.[0]?.content?.parts || []).filter(p => !p.thought);
+    const out   = parts.map(p => p.text || '').join('').trim();
+    if (!out) Logger.log(`callGeminiDR [${model}] 200 but empty — raw: ${res.getContentText().slice(0, 200)}`);
+    return out;
   } catch (e) { Logger.log('callGeminiDR error: ' + e.message); return ''; }
 }
 
