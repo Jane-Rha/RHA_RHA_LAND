@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.1.1
+// @version      1.2.0
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
@@ -139,15 +139,17 @@
     }
   }
 
-  const setByLabel = (label, v) =>
-    v
-      ? setKatInput(
-          [...document.querySelectorAll('kat-input')].find(
-            k => (k.getAttribute('label') || '').trim().toLowerCase() === label.toLowerCase()
-          ),
-          v
-        )
-      : false;
+  // Try multiple label candidates (English + Korean) — whichever matches the current SC language
+  const setByAnyLabel = (labels, v) => {
+    if (!v) return false;
+    const allKat = [...document.querySelectorAll('kat-input')];
+    const el = allKat.find(k =>
+      labels.some(lbl => (k.getAttribute('label') || '').trim().toLowerCase() === lbl.toLowerCase())
+    );
+    return el ? setKatInput(el, v) : false;
+  };
+
+  const setByLabel = (label, v) => setByAnyLabel([label], v);
 
   const setById = (id, v) =>
     v ? setKatInput(document.getElementById(id), v) : false;
@@ -158,7 +160,8 @@
     if (!code) return false;
     const upper = code.toUpperCase().replace(/^UK$/, 'GB').replace(/^EL$/, 'GR');
 
-    const dd = document.querySelector('kat-dropdown[label="Country"]');
+    const dd = document.querySelector('kat-dropdown[label="Country"]') ||
+               document.querySelector('kat-dropdown[label="국가"]');
     if (!dd) { LOG('Country dropdown not found.'); return false; }
 
     const sr = dd.shadowRoot;
@@ -353,7 +356,7 @@
     for (const el of labels) {
       const attrText = (el.getAttribute('text') || '').trim().toLowerCase();
       const txt = (el.textContent || '').trim().toLowerCase();
-      const isExpedited = attrText === 'expedited' || /\bexpedited\b/.test(txt);
+      const isExpedited = attrText === 'expedited' || /\bexpedited\b/.test(txt) || txt.includes('빠른 배송');
       if (!isExpedited) continue;
 
       const nativeLabel = el.querySelector('label[for]');
@@ -642,15 +645,15 @@ async function fetchOrderIdByEmail(email) {
   function fillAll({ name, street, city, state, postal, phone, email, country, countryRaw, q }) {
     let ok = false;
 
-    ok = setByLabel('Full name',        name)   || ok;
-    ok = setByLabel('Street address',   street) || ok;
-    ok = setByLabel('City',             city)   || ok;
-    ok = setByLabel('State / Province', state)  || ok;
-    ok = setByLabel('Postcode',         postal) || ok;
-    ok = setByLabel('Phone number',     phone)  || ok;
+    ok = setByAnyLabel(['Full name',        '전체 이름'],          name)   || ok;
+    ok = setByAnyLabel(['Street address',   '상세 주소'],          street) || ok;
+    ok = setByAnyLabel(['City',             '도시'],               city)   || ok;
+    ok = setByAnyLabel(['State / Province', '시/도'],             state)  || ok;
+    ok = setByAnyLabel(['Postcode',         '우편번호'],           postal) || ok;
+    ok = setByAnyLabel(['Phone number',     '전화번호'],           phone)  || ok;
 
     if (email) {
-      ok = setByLabel('Email address', email) || ok;
+      ok = setByAnyLabel(['Email address',  '이메일 주소'], email) || ok;
       setById('katal-id-9', email);
     }
 
@@ -733,6 +736,48 @@ async function fetchOrderIdByEmail(email) {
 
   // Bind UI button
   ui.querySelector('#mcf-clip').onclick = pasteFromClipboard;
+
+  // ── 클립보드 붙여넣기 이벤트 (Ctrl+V 전역) ──────────────────────────────
+  // Reads from e.clipboardData directly — no browser clipboard permission needed.
+  // Works on Windows PCs where navigator.clipboard.readText() silently fails.
+  document.addEventListener('paste', async (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text/plain') || '';
+    if (!text) return;
+
+    // Only intercept if content looks like MCF ticket data
+    const looksLikeMcf =
+      /\b(B[A-Z0-9]{9})\b/.test(text) ||           // ASIN
+      /\bSKU\b/i.test(text) ||
+      /^\s*1[.)]\s+.{3,}/m.test(text) ||            // numbered address block starting with 1.
+      (/Country.*:/i.test(text) && /\d{4,}/.test(text)); // country + postal code
+
+    if (!looksLikeMcf) return; // Not ticket data — let native paste proceed
+
+    // Prevent pasting raw text into whatever was focused
+    e.preventDefault();
+
+    const d = parseClipboard(text);
+    if (!d.name && !d.q && !d.email) return;
+
+    msg('클립보드 자동입력 중…');
+    fillAll(d);
+
+    if (d.q) autoSelectBestSku();
+    if (d.country && d.countryRaw?.toLowerCase() !== 'united kingdom') {
+      setTimeout(() => setCountry(d.country), 800);
+    }
+    if (d.email) {
+      msg('시트 업데이트 중…');
+      const orderId = await markRowMcfByEmail(d.email);
+      if (orderId) {
+        setOrderIdInput(orderId);
+        msg('Order ID 자동입력 완료: ' + orderId);
+      } else {
+        msg('시트 업데이트 완료 (Order ID 없음)');
+      }
+    }
+    ensureExpeditedAfterReady();
+  });
 
   // ── URL 해시 브릿지: Zendesk GCX Reply → MCF 자동입력 ───────────────────
   async function autoFillFromUrlHash() {
