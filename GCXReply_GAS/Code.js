@@ -1,4 +1,4 @@
-// GCX Reply — Apps Script Web App (v2.4.1)
+// GCX Reply — Apps Script Web App (v2.5.0)
 // Endpoint: ?orderId=XXX  |  ?asin=XXX  |  ?orderId=XXX&asin=XXX
 // Deploy as: Execute as Me, Access: Anyone (or Anyone anonymous)
 // Script Properties required: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
@@ -113,6 +113,19 @@ function respond(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Keep-warm: prevents GAS cold starts during business hours ─────────────────
+// Run setupKeepWarmTrigger() ONCE from the GAS editor to install it.
+function keepWarm() {
+  CacheService.getScriptCache().get('ping');
+}
+
+function setupKeepWarmTrigger() {
+  const existing = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'keepWarm');
+  if (existing.length) { Logger.log('keepWarm trigger already exists (' + existing.length + ')'); return; }
+  ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(5).create();
+  Logger.log('keepWarm trigger created — fires every 5 minutes');
 }
 
 // ── LWA token (cached 4 min) ──────────────────────────────────────────────────
@@ -454,7 +467,13 @@ function lookupAsinFromMarket_(asin) {
 
 // ── Full lookup chain: sheet1 → sheet2 Data → market country sheets ──────────
 // Always checks both sheet1 and sheet2 for allSources; uses priority for product.
+// Results are cached per-ASIN for 30 minutes to avoid repeated full-sheet reads.
 function lookupAsinAll_(asin) {
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'asin_all_' + asin;
+  const hit      = cache.get(cacheKey);
+  if (hit) return JSON.parse(hit);
+
   const sheet1 = lookupAsin_(asin);
   const sheet2 = lookupAsin2_(asin);
 
@@ -466,7 +485,9 @@ function lookupAsinAll_(asin) {
     if (product) productSource = 'market';
   }
 
-  return { product, productSource, allSources: { sheet1: sheet1 || null, sheet2: sheet2 || null } };
+  const result = { product, productSource, allSources: { sheet1: sheet1 || null, sheet2: sheet2 || null } };
+  try { cache.put(cacheKey, JSON.stringify(result), 1800); } catch (_) {}
+  return result;
 }
 
 // ── AI 인입사유 functions ──────────────────────────────────────────────────────
@@ -734,4 +755,20 @@ function fixProductSheetData() {
     }
   }
   Logger.log(`Done — fixed ${count} rows in product sheet`);
+
+  // Clear per-ASIN cache for the corrected SKUs so agents see updated data immediately.
+  // Find ASINs that correspond to the fixed SKUs, then remove their cache entries.
+  const asinsToInvalidate = [];
+  for (let i = 1; i < data.length; i++) {
+    const sku = data[i][SKU_COL];
+    if (FIXES[sku]) {
+      const asinCol = headers.indexOf('ASIN');
+      if (asinCol >= 0 && data[i][asinCol]) asinsToInvalidate.push(String(data[i][asinCol]));
+    }
+  }
+  if (asinsToInvalidate.length) {
+    const cache = CacheService.getScriptCache();
+    asinsToInvalidate.forEach(a => cache.remove('asin_all_' + a));
+    Logger.log('Cache invalidated for ASINs: ' + asinsToInvalidate.join(', '));
+  }
 }

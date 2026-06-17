@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.9
+
+// @version      2.9.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +58,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.5';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.0';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -1347,6 +1348,12 @@
     } catch (_) {}
   }
   safeAddStyle_(`
+    /* ── Liquid-glass keyframe ──────────────────────────────────────────── */
+    @keyframes sp-rainbow {
+      to { filter: hue-rotate(360deg); }
+    }
+
+    /* ── Main panel — frosted glass ─────────────────────────────────────── */
     #sp-order-panel {
       position: fixed;
       right: 16px;
@@ -1358,22 +1365,58 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      background: #fff;
-      border: 1px solid #d8dcde;
-      border-radius: 6px;
-      box-shadow: 0 4px 18px rgba(0,0,0,.16);
+      /* frosted glass */
+      background: rgba(246, 247, 255, 0.52);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: none;
+      border-radius: 20px;
+      box-shadow:
+        0 12px 48px rgba(0,0,0,0.18),
+        0 2px 8px rgba(0,0,0,0.10),
+        inset 0 1px 0 rgba(255,255,255,0.88),
+        inset 0 -1px 0 rgba(255,255,255,0.28);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       font-size: 12.5px;
-      color: #1f1f1f;
+      color: #1a1a2e;
       z-index: 99999;
     }
+
+    /* Rainbow iridescent border — mask trick: conic-gradient visible only in the 1.5px padding ring */
+    #sp-order-panel::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 20px;
+      padding: 1.5px;
+      background: conic-gradient(
+        from 180deg,
+        rgba(255, 60, 120, 0.85),
+        rgba(255, 140, 0,  0.85),
+        rgba(250, 230, 0,  0.85),
+        rgba(0,  220, 110, 0.85),
+        rgba(0,  160, 255, 0.85),
+        rgba(170, 0,  255, 0.85),
+        rgba(255, 60, 120, 0.85)
+      );
+      -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+      z-index: 10000;
+      animation: sp-rainbow 6s linear infinite;
+    }
+
     #sp-order-panel * { box-sizing: border-box; }
 
+    /* ── Header ─────────────────────────────────────────────────────────── */
     #sp-panel-header {
       padding: 9px 12px;
-      background: #f3f4f5;
-      border-bottom: 1px solid #d8dcde;
-      border-radius: 6px 6px 0 0;
+      background: rgba(238, 240, 255, 0.55);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+      border-radius: 20px 20px 0 0;
       display: flex;
       align-items: center;
       gap: 7px;
@@ -1389,23 +1432,24 @@
       font-size: 18px;
       line-height: .7;
       padding: 2px 6px 4px;
-      border-radius: 3px;
+      border-radius: 6px;
     }
-    #sp-minimize-btn:hover { opacity: 1; background: #e3e5e7; }
+    #sp-minimize-btn:hover { opacity: 1; background: rgba(180,185,210,0.35); }
     #sp-panel-close {
       cursor: pointer;
       opacity: .5;
       font-size: 15px;
       line-height: 1;
       padding: 2px 5px;
-      border-radius: 3px;
+      border-radius: 6px;
     }
-    #sp-panel-close:hover { opacity: 1; background: #e3e5e7; }
+    #sp-panel-close:hover { opacity: 1; background: rgba(180,185,210,0.35); }
 
     #sp-order-panel.minimized #sp-panel-body,
     #sp-order-panel.minimized #sp-resize-handle { display: none; }
-    #sp-order-panel.minimized #sp-panel-header { border-radius: 6px; border-bottom: none; cursor: pointer; }
+    #sp-order-panel.minimized #sp-panel-header { border-radius: 20px; border-bottom: none; cursor: pointer; }
 
+    /* ── Resize handle ──────────────────────────────────────────────────── */
     #sp-resize-handle {
       position: absolute;
       bottom: 0;
@@ -1413,15 +1457,16 @@
       width: 16px;
       height: 16px;
       cursor: se-resize;
-      opacity: .35;
+      opacity: .28;
       background: repeating-linear-gradient(
         -45deg,
-        #999 0px, #999 2px,
+        #8890bb 0px, #8890bb 2px,
         transparent 2px, transparent 5px
       );
     }
-    #sp-resize-handle:hover { opacity: .75; }
+    #sp-resize-handle:hover { opacity: .65; }
 
+    /* ── Scrollable body ────────────────────────────────────────────────── */
     #sp-panel-body {
       padding: 10px 14px 8px;
       overflow-y: auto;
@@ -1433,6 +1478,7 @@
     #sp-order-panel.sp-compact .sp-label { min-width: 0; font-size: 10.5px; }
     #sp-order-panel.sp-compact .sp-val   { font-size: 11.5px; }
 
+    /* ── Input bars ─────────────────────────────────────────────────────── */
     #sp-id-bar {
       display: flex;
       gap: 6px;
@@ -1441,60 +1487,69 @@
     }
     #sp-order-input {
       flex: 1;
-      border: 1px solid #c8cacc;
-      border-radius: 4px;
+      background: rgba(255,255,255,0.62);
+      border: 1px solid rgba(180,190,220,0.55);
+      border-radius: 8px;
       padding: 5px 8px;
       font-size: 12px;
       font-family: monospace;
       outline: none;
+      color: #1a1a2e;
     }
-    #sp-order-input:focus { border-color: #5ba4cf; box-shadow: 0 0 0 2px rgba(91,164,207,.2); }
+    #sp-order-input:focus { border-color: #5ba4cf; box-shadow: 0 0 0 2px rgba(91,164,207,.25); background: rgba(255,255,255,0.82); }
     #sp-asin-input {
       flex: 1;
-      border: 1px solid #c8cacc;
-      border-radius: 4px;
+      background: rgba(255,255,255,0.62);
+      border: 1px solid rgba(180,190,220,0.55);
+      border-radius: 8px;
       padding: 5px 8px;
       font-size: 12px;
       font-family: monospace;
       outline: none;
+      color: #1a1a2e;
     }
-    #sp-asin-input:focus { border-color: #f0a500; box-shadow: 0 0 0 2px rgba(240,165,0,.2); }
+    #sp-asin-input:focus { border-color: #f0a500; box-shadow: 0 0 0 2px rgba(240,165,0,.25); background: rgba(255,255,255,0.82); }
+
+    /* ── Buttons ────────────────────────────────────────────────────────── */
     #sp-lookup-btn {
-      background: #5ba4cf;
+      background: rgba(91,164,207,0.88);
       color: #fff;
       border: none;
-      border-radius: 4px;
+      border-radius: 8px;
       padding: 5px 10px;
       cursor: pointer;
       font-size: 12px;
       white-space: nowrap;
+      backdrop-filter: blur(4px);
     }
-    #sp-lookup-btn:hover { background: #4a8fba; }
+    #sp-lookup-btn:hover { background: rgba(74,143,186,0.95); }
     #sp-product-btn {
-      background: #f0a500;
+      background: rgba(240,165,0,0.88);
       color: #fff;
       border: none;
-      border-radius: 4px;
+      border-radius: 8px;
       padding: 5px 10px;
       cursor: pointer;
       font-size: 12px;
       white-space: nowrap;
+      backdrop-filter: blur(4px);
     }
-    #sp-product-btn:hover { background: #d99200; }
+    #sp-product-btn:hover { background: rgba(217,146,0,0.95); }
 
     #sp-autofill-bar { margin-bottom: 8px; display: none; }
     #sp-autofill-btn {
-      background: #27ae60;
+      background: rgba(39,174,96,0.88);
       color: #fff;
       border: none;
-      border-radius: 4px;
+      border-radius: 8px;
       padding: 5px 0;
       cursor: pointer;
       font-size: 12px;
       width: 100%;
+      backdrop-filter: blur(4px);
     }
-    #sp-autofill-btn:hover:not(:disabled) { background: #219a52; }
-    #sp-autofill-btn:disabled { background: #a8d5b5; cursor: default; }
+    #sp-autofill-btn:hover:not(:disabled) { background: rgba(33,154,82,0.96); }
+    #sp-autofill-btn:disabled { background: rgba(168,213,181,0.7); cursor: default; }
     #sp-fill-status {
       display: none;
       font-size: 11px;
@@ -1503,10 +1558,11 @@
       text-align: center;
     }
 
+    /* ── Order ID chips ─────────────────────────────────────────────────── */
     #sp-detected-ids { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; }
     .sp-chip {
-      background: #e8f4fc;
-      border: 1px solid #5ba4cf;
+      background: rgba(232,244,252,0.72);
+      border: 1px solid rgba(91,164,207,0.6);
       color: #1a6490;
       border-radius: 12px;
       padding: 2px 10px;
@@ -1514,16 +1570,18 @@
       cursor: pointer;
       font-family: monospace;
       user-select: none;
+      backdrop-filter: blur(4px);
     }
-    .sp-chip:hover { background: #c8e4f5; }
+    .sp-chip:hover { background: rgba(200,228,245,0.85); }
 
     #sp-status {
       text-align: center;
       padding: 14px 8px;
-      color: #888;
+      color: #6670a0;
       font-size: 12px;
     }
 
+    /* ── Collapsible blocks ─────────────────────────────────────────────── */
     .sp-block { margin-top: 4px; }
     .sp-block-title {
       display: flex;
@@ -1532,15 +1590,16 @@
       padding: 7px 0 4px;
       font-weight: 600;
       font-size: 12.5px;
-      color: #2f3941;
+      color: #2a304a;
       cursor: pointer;
       user-select: none;
-      border-top: 1px solid #e9ebec;
+      border-top: 1px solid rgba(210,215,235,0.6);
     }
-    .sp-block-title .sp-chevron { margin-left: auto; transition: transform .18s; color: #aaa; }
+    .sp-block-title .sp-chevron { margin-left: auto; transition: transform .18s; color: rgba(160,165,190,0.9); }
     .sp-block.collapsed .sp-block-title .sp-chevron { transform: rotate(-90deg); }
     .sp-block.collapsed .sp-block-body { display: none; }
 
+    /* ── Data rows ──────────────────────────────────────────────────────── */
     .sp-row {
       display: flex;
       align-items: flex-start;
@@ -1548,28 +1607,30 @@
       gap: 6px;
     }
     .sp-row:nth-child(odd) {
-      background: #f8f9fa;
+      background: rgba(240,242,255,0.48);
       margin: 0 -14px;
       padding: 4px 14px;
+      border-radius: 6px;
     }
-    .sp-label { color: #5ba4cf; min-width: 128px; flex-shrink: 0; font-size: 12px; }
-    .sp-val   { color: #2f3941; font-weight: 500; word-break: break-all; font-size: 12px; }
+    .sp-label { color: #4a8fcf; min-width: 128px; flex-shrink: 0; font-size: 12px; }
+    .sp-val   { color: #22263a; font-weight: 500; word-break: break-all; font-size: 12px; }
     .sp-val.link { color: #5ba4cf; text-decoration: underline; cursor: pointer; }
 
     .sp-items-title {
       font-weight: 600;
       font-size: 11.5px;
-      color: #666;
+      color: #5c627a;
       padding: 6px 0 2px;
-      border-top: 1px solid #eee;
+      border-top: 1px solid rgba(210,215,235,0.5);
       margin-top: 2px;
     }
 
+    /* ── Step log ───────────────────────────────────────────────────────── */
     #sp-load-log {
       font-size: 10px;
-      color: #999;
+      color: #8890aa;
       padding: 3px 14px 4px;
-      border-top: 1px dashed #e5e7ea;
+      border-top: 1px dashed rgba(200,205,230,0.5);
       max-height: 56px;
       overflow-y: auto;
       font-family: monospace;
@@ -1578,35 +1639,39 @@
     }
     #sp-load-log:empty { display: none; }
 
+    /* ── Toggle button (shown when panel is closed) ──────────────────────── */
     #sp-toggle-btn {
       position: fixed;
       right: 16px;
       top: 56px;
-      background: #5ba4cf;
+      background: rgba(91,164,207,0.82);
+      backdrop-filter: blur(18px) saturate(160%);
+      -webkit-backdrop-filter: blur(18px) saturate(160%);
       color: #fff;
-      border: none;
+      border: 1px solid rgba(255,255,255,0.4);
       border-radius: 20px;
       padding: 6px 12px;
       font-size: 12px;
       cursor: pointer;
       z-index: 99999;
-      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+      box-shadow: 0 2px 12px rgba(0,0,0,.18);
       display: none;
     }
-    #sp-toggle-btn:hover { background: #4a8fba; }
+    #sp-toggle-btn:hover { background: rgba(74,143,186,0.92); }
 
     #sp-mcf-bar { margin-bottom: 8px; display: none; }
     #sp-mcf-btn {
-      background: #ff9900;
+      background: rgba(255,153,0,0.88);
       color: #fff;
       border: none;
-      border-radius: 4px;
+      border-radius: 8px;
       padding: 5px 0;
       cursor: pointer;
       font-size: 12px;
       width: 100%;
+      backdrop-filter: blur(4px);
     }
-    #sp-mcf-btn:hover { background: #e68a00; }
+    #sp-mcf-btn:hover { background: rgba(230,138,0,0.96); }
     #sp-mcf-status {
       display: none;
       font-size: 11px;
@@ -1625,7 +1690,7 @@
       cursor: pointer;
       user-select: none;
       font-size: 12px;
-      color: #5ba4cf;
+      color: #4a8fcf;
       font-weight: 500;
     }
     #sp-notes-toggle { cursor: pointer; accent-color: #5ba4cf; }
@@ -1635,11 +1700,11 @@
     }
     #sp-notes-content {
       font-size: 12px;
-      color: #2f3941;
+      color: #22263a;
       white-space: pre-wrap;
       padding: 6px 8px;
-      background: #f8f9fa;
-      border: 1px solid #e9ebec;
+      background: rgba(240,242,255,0.55);
+      border: 1px solid rgba(200,205,230,0.5);
       border-radius: 4px;
       min-height: 36px;
     }
@@ -2456,7 +2521,7 @@
           lastTicketId = newId;
           resetPanel();
           clearTimeout(navTimer);
-          navTimer = setTimeout(autoDetectAll, 2500);
+          navTimer = setTimeout(autoDetectAll, 1500);
         }
       } else {
         // Left ticket pages (filters, views, etc.) — always collapse
@@ -2482,7 +2547,7 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    if (isTicketPage_()) setTimeout(autoDetectAll, 2500);
+    if (isTicketPage_()) setTimeout(autoDetectAll, 1500);
   }
 
   // 국가 코드 → Amazon MCF Seller Central URL
