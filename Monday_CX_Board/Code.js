@@ -68,7 +68,8 @@ function syncMondayBoardToSheet(reqId){
   _acquireRunLock_();
   try{
     const apiKey = _getMondayApiKey_();
-    const sheet = SpreadsheetApp.getActive().getActiveSheet();
+    const ss = SpreadsheetApp.getActive();
+    const sheet = ss.getSheetByName('Data') || ss.getActiveSheet();
     _pushLog_(reqId, 'Start sync → board='+BOARD_ID+', sheet="'+sheet.getName()+'"');
 
     // 1) Columns
