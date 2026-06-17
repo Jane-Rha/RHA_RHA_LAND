@@ -2,7 +2,7 @@
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
 
-// @version      2.9.1
+// @version      2.9.3
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -58,7 +58,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.1';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.3';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -587,6 +587,28 @@
     const pane = (m && document.querySelector(`[data-test-id="ticket-${m[1]}-standard-layout"]`)) || document.body;
     const inputText = [...pane.querySelectorAll('input, textarea')].map(el => el.value || '').join('\n');
     return (pane.innerText || '') + '\n' + inputText;
+  }
+
+  // ── AI 인입사유용 텍스트 추출 (고객 메시지 + Spigen CS 요약) ─────────────────
+  function getAiInputText_() {
+    const m = location.pathname.match(/\/tickets\/(\d+)/);
+    const pane = (m && document.querySelector(`[data-test-id="ticket-${m[1]}-standard-layout"]`)) || document.body;
+    const full = (pane.innerText || '').replace(/[ \t]+/g, ' ').trim();
+    if (!full) return '';
+
+    const CS_NAME = 'Spigen Customer Service';
+    const csIdx   = full.indexOf(CS_NAME);
+
+    if (csIdx !== -1) {
+      // 고객 첫 메시지 (CS 요약 이전) + CS 한국어 요약 (이후 600자)
+      const customerPart = full.slice(0, Math.min(csIdx, 800)).trim();
+      const csPart       = full.slice(csIdx + CS_NAME.length, csIdx + CS_NAME.length + 600).trim();
+      const combined = [customerPart, csPart ? `[CS요약]\n${csPart}` : ''].filter(Boolean).join('\n\n---\n\n');
+      return combined.slice(0, 2500);
+    }
+
+    // CS 요약 없으면 첫 2000자만 사용
+    return full.slice(0, 2000);
   }
 
   // ── MCF: 티켓 본문에서 고객 주소 파싱 (MCF Autofill parseClipboard와 동일 로직) ─
@@ -1130,7 +1152,7 @@
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
       const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getTicketBodyText_();
+      const aiReview   = getAiInputText_();
       if (aiReview) fetchAiReason_(aiReview, aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
@@ -1326,18 +1348,10 @@
     } catch (_) {}
   }
   safeAddStyle_(`
-    /* ── Liquid-glass keyframes ─────────────────────────────────────────── */
-    /* Slow light-angle drift — mimics sunlight moving across real glass     */
-    @keyframes sp-glass-shimmer {
-      0%   { filter: hue-rotate(0deg)   brightness(1.00); }
-      30%  { filter: hue-rotate(12deg)  brightness(1.04); }
-      60%  { filter: hue-rotate(-8deg)  brightness(0.98); }
-      100% { filter: hue-rotate(0deg)   brightness(1.00); }
-    }
-
     /* ── Main panel — Apple Liquid Glass ────────────────────────────────── */
-    /* Apple spec: "combines optical properties of glass with a sense of     */
-    /* fluidity" — content infuses through; the glass is nearly invisible.   */
+    /* UIGlassEffect = UIVisualEffect; the blur does all the work.           */
+    /* Border = gradient bright at top (specular), fading at sides/bottom — */
+    /* exactly like a real glass edge catching light from above.             */
     #sp-order-panel {
       position: fixed;
       right: 16px;
@@ -1349,69 +1363,29 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      /* Very transparent so Zendesk content bleeds through */
-      background: rgba(255, 255, 255, 0.28);
-      backdrop-filter: blur(40px) saturate(200%) brightness(108%);
-      -webkit-backdrop-filter: blur(40px) saturate(200%) brightness(108%);
-      border: none;
+      /* Fill + gradient border via background-clip — no pseudo-elements    */
+      background:
+        linear-gradient(rgba(255,255,255,0.14), rgba(255,255,255,0.14)) padding-box,
+        linear-gradient(
+          155deg,
+          rgba(255,255,255,0.92) 0%,
+          rgba(255,255,255,0.48) 28%,
+          rgba(255,255,255,0.28) 55%,
+          rgba(255,255,255,0.38) 78%,
+          rgba(255,255,255,0.70) 100%
+        ) border-box;
+      border: 1.5px solid transparent;
+      backdrop-filter: blur(56px) saturate(180%);
+      -webkit-backdrop-filter: blur(56px) saturate(180%);
       border-radius: 22px;
       box-shadow:
-        0 20px 60px rgba(0,0,0,0.13),
-        0 2px 6px rgba(0,0,0,0.07),
-        /* Top specular — the defining glass highlight */
-        inset 0 2px 0 rgba(255,255,255,0.95),
-        /* Inner glow depth */
-        inset 0 1px 28px rgba(255,255,255,0.18),
-        /* Bottom inner shadow for thickness illusion */
-        inset 0 -1px 0 rgba(255,255,255,0.22);
+        0 8px 40px rgba(0,0,0,0.10),
+        0 1px 4px rgba(0,0,0,0.06),
+        inset 0 1.5px 0 rgba(255,255,255,0.96);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       font-size: 12.5px;
       color: #1c1c1e;
       z-index: 99999;
-    }
-
-    /* Glass edge — real glass iridescence: pastel, low-saturation, slow     */
-    /* Like a soap bubble or glass lens edge catching light at an angle       */
-    #sp-order-panel::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 22px;
-      padding: 1px;
-      background: conic-gradient(
-        from 0deg,
-        rgba(255, 255, 255, 0.90),   /* white specular — light hitting edge  */
-        rgba(200, 220, 255, 0.55),   /* pale blue — glass tint               */
-        rgba(255, 210, 250, 0.45),   /* pale pink — thin-film interference   */
-        rgba(200, 255, 230, 0.40),   /* pale mint                            */
-        rgba(255, 245, 200, 0.50),   /* pale gold                            */
-        rgba(225, 200, 255, 0.50),   /* pale lavender                        */
-        rgba(255, 255, 255, 0.90)    /* white specular again                 */
-      );
-      -webkit-mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      pointer-events: none;
-      z-index: 10000;
-      animation: sp-glass-shimmer 15s ease-in-out infinite;
-    }
-
-    /* Inner glass-face gradient — gives the glass a slight convex sheen     */
-    #sp-order-panel::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 22px;
-      background: linear-gradient(
-        175deg,
-        rgba(255,255,255,0.22) 0%,
-        rgba(255,255,255,0.04) 55%,
-        rgba(0,0,0,0.03) 100%
-      );
-      pointer-events: none;
-      z-index: 1;
     }
 
     #sp-order-panel * { box-sizing: border-box; }
@@ -1419,8 +1393,8 @@
     /* ── Header ─────────────────────────────────────────────────────────── */
     #sp-panel-header {
       padding: 9px 12px;
-      background: rgba(255, 255, 255, 0.30);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.50);
+      background: rgba(255, 255, 255, 0.16);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.38);
       border-radius: 22px 22px 0 0;
       display: flex;
       align-items: center;
