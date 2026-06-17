@@ -12,6 +12,13 @@ const PRODUCT_COLS  = ['SKU','모델명','브랜드','제조사명','기종명',
 const MARKET_SS_ID  = '172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA';
 const MARKET_SHEETS = ['DE', 'NL', 'SE', 'ES', 'UK', 'FR', 'IT', 'JP', 'IN', 'SG'];
 
+// ── AI 인입사유 (DR) ───────────────────────────────────────────────────────────
+const DEFECT_SS_ID      = '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g';
+const DEFECT_SHEET_NAME = 'Defect';
+const DR_CACHE_VERSION  = 'DR_v22_';
+const DR_CACHE_TTL      = 21600;
+const GEMINI_MODELS_DR  = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+
 const REGIONS = [
   { endpoint: 'https://sellingpartnerapi-eu.amazon.com', region: 'eu-west-1', cred: 'main' },
   { endpoint: 'https://sellingpartnerapi-fe.amazon.com', region: 'us-west-2', cred: 'jp'   },
@@ -55,6 +62,13 @@ function doGet(e) {
     const p       = (e && e.parameter) || {};
     const orderId = p.orderId;
     const asin    = p.asin;
+
+    if (p.action === 'inferReason') {
+      const review   = p.review   || '';
+      const category = p.category || '';
+      if (!review) return respond({ error: 'Provide review parameter' });
+      return respond({ reason: inferReason_(review, category) });
+    }
 
     if (!orderId && !asin) {
       return respond({ error: 'Provide orderId and/or asin parameter' });
@@ -474,6 +488,111 @@ function lookupAsinAll_(asin) {
   const result = { product, productSource, allSources: { sheet1: sheet1 || null, sheet2: sheet2 || null } };
   try { cache.put(cacheKey, JSON.stringify(result), 1800); } catch (_) {}
   return result;
+}
+
+// ── AI 인입사유 functions ──────────────────────────────────────────────────────
+function inferReason_(text, category) {
+  text     = String(text     || '').trim().toLowerCase();
+  category = String(category || '').trim();
+  if (!text) return '';
+
+  const cacheKey = DR_CACHE_VERSION + Utilities.base64Encode(text + '|' + category).slice(0, 100);
+  const cache    = CacheService.getScriptCache();
+  const hit      = cache.get(cacheKey);
+  if (hit) { Logger.log('inferReason cache hit: ' + hit); return hit; }
+
+  const { rawList, list, enrichedList } = loadDefectDataDR_(category);
+  Logger.log(`loadDefectData: rawList.length=${rawList.length}, category="${category}"`);
+  if (!rawList.length) return '';
+
+  const fast = drKeyword_(text);
+  Logger.log(`drKeyword: "${fast}"`);
+  if (fast && rawList.includes(fast)) { cache.put(cacheKey, fast, DR_CACHE_TTL); return fast; }
+
+  let output = '';
+  for (const model of GEMINI_MODELS_DR) {
+    const r = callGeminiDR_(text, enrichedList, model);
+    Logger.log(`Gemini [${model}]: "${r}"`);
+    if (r && r.trim()) { output = r.replace(/["'\n\r]/g, '').trim(); break; }
+  }
+  Logger.log(`gemini output: "${output}"`);
+  if (!output) return '';
+
+  const norm = drNorm_(output);
+  const idx  = list.findIndex(v => v === norm);
+  if (idx !== -1) { cache.put(cacheKey, rawList[idx], DR_CACHE_TTL); return rawList[idx]; }
+
+  const li = list.findIndex(v => norm.includes(v) || v.includes(norm));
+  if (li  !== -1) { cache.put(cacheKey, rawList[li],  DR_CACHE_TTL); return rawList[li]; }
+
+  Logger.log(`no match found for norm="${norm}", list=${JSON.stringify(list.slice(0,5))}`);
+  return '';
+}
+
+function loadDefectDataDR_(category) {
+  const sh = SpreadsheetApp.openById(DEFECT_SS_ID).getSheetByName(DEFECT_SHEET_NAME);
+  if (!sh) { Logger.log('loadDefectData: sheet not found'); return { rawList: [], list: [], enrichedList: [] }; }
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { rawList: [], list: [], enrichedList: [] };
+
+  const rows = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+  let filtered = rows.filter(r => (!category || String(r[0]).trim() === category) && r[1]);
+  if (!filtered.length && category) {
+    Logger.log(`loadDefectData: no rows for category="${category}", using all`);
+    filtered = rows.filter(r => r[1]);
+  }
+
+  const rawList      = filtered.map(r => String(r[1]).trim());
+  const list         = rawList.map(drNorm_);
+  const enrichedList = filtered.map(r => {
+    const label = String(r[1]).trim();
+    const desc  = String(r[2] || '').trim();
+    return desc ? `${label}: ${desc}` : label;
+  });
+  return { rawList, list, enrichedList };
+}
+
+function callGeminiDR_(text, enrichedList, model) {
+  try {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    if (!apiKey) { Logger.log('callGeminiDR: GEMINI_API_KEY not set'); return ''; }
+    const prompt =
+      `You are classifying customer feedback into predefined categories.\n\nCategories:\n${enrichedList.join('\n')}\n\nRules:\n- Return ONLY ONE label\n- Return ONLY the label text\n- No explanation, punctuation, quotes, or markdown\n\nInput:\n${text}`;
+    const res = UrlFetchApp.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        payload: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 20 },
+        }),
+      }
+    );
+    if (res.getResponseCode() !== 200) {
+      Logger.log(`callGeminiDR [${model}] HTTP ${res.getResponseCode()}: ${res.getContentText().slice(0, 200)}`);
+      return '';
+    }
+    const json = JSON.parse(res.getContentText());
+    return (json.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+  } catch (e) { Logger.log('callGeminiDR error: ' + e.message); return ''; }
+}
+
+function testInferReason() {
+  Logger.log('=== testInferReason ===');
+  Logger.log(JSON.stringify({ reason: inferReason_('this case is too thick and heavy', '') }));
+}
+
+function drKeyword_(text) {
+  if (/heavy|bulky/.test(text))              return '두꺼움';
+  if (text.includes('yellow'))               return '황변';
+  if (text.includes('button'))               return '버튼불량';
+  if (/attach|difficult/.test(text))         return '부착어려움';
+  if (/scratch|scratched/.test(text))        return '스크래치';
+  return '';
+}
+
+function drNorm_(text) {
+  return String(text || '').toLowerCase().replace(/\s+/g, '').replace(/[()]/g, '').replace(/[^a-z0-9가-힣]/gi, '').trim();
 }
 
 function updateFeedbackSheet() {
