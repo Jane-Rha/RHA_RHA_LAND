@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.6
+// @version      2.7.6
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,14 +57,13 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.5';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.7.5';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
   let lastProductData  = null;
   let _panelSession    = 0; // incremented on every resetPanel(); guards stale async callbacks
   let _productReady    = false; // true once product lookup finishes (or is determined impossible)
-  let _gcrFilledThisTicket = false; // true after Auto-Fill confirmed & submitted on current ticket
 
   // ── UI state persistence ──────────────────────────────────────────────────
   function loadUi() {
@@ -83,7 +82,6 @@
     });
   }
   let lastAmazonProduct = null;
-  let lastAiReason      = null;
 
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
@@ -321,21 +319,6 @@
       }
     }
     return '';
-  }
-
-  // Returns the actual DOM label text for the ZD field whose label starts with `labelPrefix`.
-  function resolveZdLabel_(labelPrefix) {
-    const needle = normLabel(labelPrefix);
-    for (const input of document.querySelectorAll(
-      '[data-test-id="ticket-fields-text-field"], [data-test-id="ticket-fields-date-field"]'
-    )) {
-      let node = input.parentElement;
-      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
-        const lbl = node.querySelector('label');
-        if (lbl && normLabel(lbl.textContent).startsWith(needle)) return lbl.textContent.trim();
-      }
-    }
-    return null;
   }
 
   // Fetch Zendesk field options (for Device / Product Name matching)
@@ -737,10 +720,10 @@
     const itemAsins  = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
     const asinValue  = itemAsins.length ? itemAsins.join(', ') : panelAsin;
     const rawSellerSku = lastOrderData.items?.[0]?.SellerSKU || '';
-    // Sheet SKU (p.SKU) always takes priority. Only accept rawSellerSku when it matches the
-    // Spigen SKU pattern (3 uppercase letters + 5 digits, e.g. "ACH06437", "ACS06557PAN").
-    // Rejects barcodes ("8809613760408"), model names ("PE2213IN 35w"), and non-Spigen codes ("PE2213IN").
-    const itemSku = p.SKU || (!/^[A-Z]{3}\d{5}/.test(rawSellerSku) ? '' : rawSellerSku) || '';
+    // Sheet SKU (p.SKU) is the canonical Spigen SKU and always takes priority.
+    // SellerSKU from Amazon can be EAN barcodes (all-digit 8+) or internal codes (e.g. "PA2306")
+    // that do not represent Spigen SKUs — only use it as a last resort when the sheet has nothing.
+    const itemSku = p.SKU || (/^\d{8,}$/.test(rawSellerSku) ? '' : rawSellerSku) || '';
     const totalPurchases = lastOrderData.totalPurchases ?? lastOrderData.orderCount;
     const totalRefunds   = lastOrderData.totalRefunds;
     const purchasesVal   = totalPurchases != null ? `q${Math.min(totalPurchases, 50)}` : null;
@@ -781,7 +764,7 @@
       { label: '원산지정보',         zdId: ZD.ORIGIN_INFO,  after: originInfo,         apiVal: originInfo },
     ];
     const textRows = DOM_DEFS.map(d => ({
-      label: resolveZdLabel_(d.label) || d.label, before: readZdInput_(d.label), after: d.after,
+      label: d.label, before: readZdInput_(d.label), after: d.after,
       dom: d, // carry definition for execution phase
     }));
 
@@ -789,51 +772,31 @@
     let resolvedDevice   = null; // { val, name, opts }
     let resolvedProduct  = null; // { val, name }
     let resolvedFulfill  = null; // { val, name }
-    let fulfillOpts      = [];   // all fulfillment opts — for before display name
     let resolvedHasPhoto = null;
     let currentCfMap     = {};   // fieldId → raw value from current ticket
-    let ticketSubject    = '';   // captured from ticket JSON — used for invoice detection
 
-    // Always fetch device opts (was conditional on deviceLabel); needed for invoice override
-    let remain = 1 + (productLabel ? 1 : 0) + 3; // device + fulfillment + comments + ticket
-
-    const BRAND_TAG_LABEL = {
-      spigen_case_: 'CASE', spigen_sp_: 'SP', spigen_sda_: 'SDA',
-      'spigen_pacc._': 'PAcc.', spigen_new_biz_: 'Newbiz', 'n/a': 'n/a',
-    };
+    let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0) + 3; // fulfillment + comments + ticket
 
     function buildAndShow() {
       if (--remain > 0) return;
 
-      // Invoice ticket override: if subject contains "invoice", force Device to the invoice option
-      if (/invoice/i.test(ticketSubject) && resolvedDevice?.opts) {
-        const invoiceOpt = resolvedDevice.opts.find(o => /invoice/i.test(o.name));
-        if (invoiceOpt) resolvedDevice = { val: invoiceOpt.value, name: invoiceOpt.name, opts: resolvedDevice.opts };
-      }
-
-      // Refresh textRows "before" from ZD API (currentCfMap) — more reliable than DOM snapshot
-      for (const row of textRows) {
-        const cf = currentCfMap[row.dom.zdId];
-        if (cf !== undefined) row.before = cf;
-      }
-
       // API-only rows (no DOM text field counterpart)
       const apiOnlyRows = [
-        { label: 'Device*', before: resolvedDevice?.opts?.find(o => o.value === currentCfMap[ZD.DEVICE])?.name || currentCfMap[ZD.DEVICE] || '',
+        { label: 'Device 기종', before: resolvedDevice?.opts?.find(o => o.value === currentCfMap[ZD.DEVICE])?.name || currentCfMap[ZD.DEVICE] || '',
           after: resolvedDevice?.name || '', api: resolvedDevice?.val ? { id: ZD.DEVICE, value: resolvedDevice.val } : null },
-        { label: 'Product Name *', before: '', // resolved below using product opts
+        { label: 'Product Name', before: resolvedDevice?.opts ? '' : '', // resolved separately
           after: resolvedProduct?.name || '', api: resolvedProduct?.val ? { id: ZD.PRODUCT_NAME, value: resolvedProduct.val } : null },
-        { label: 'Country*',      before: currentCfMap[ZD.COUNTRY]     || '', after: COUNTRY_MAP[ad.CountryCode] || '', api: COUNTRY_MAP[ad.CountryCode] ? { id: ZD.COUNTRY, value: COUNTRY_MAP[ad.CountryCode] } : null },
+        { label: 'Country',      before: currentCfMap[ZD.COUNTRY]     || '', after: COUNTRY_MAP[ad.CountryCode] || '', api: COUNTRY_MAP[ad.CountryCode] ? { id: ZD.COUNTRY, value: COUNTRY_MAP[ad.CountryCode] } : null },
         { label: 'Point of Purchase', before: currentCfMap[ZD.POINT_OF_PUR] || '', after: pop || '', api: pop ? { id: ZD.POINT_OF_PUR, value: pop } : null },
-        { label: 'Amazon Fulfillment Methods*', before: fulfillOpts.find(o => o.value === currentCfMap[ZD.FULFILLMENT])?.name || currentCfMap[ZD.FULFILLMENT] || '', after: resolvedFulfill?.name || '', api: resolvedFulfill?.val ? { id: ZD.FULFILLMENT, value: resolvedFulfill.val } : null },
-        { label: 'Brand(상세)*', before: BRAND_TAG_LABEL[currentCfMap[ZD.BRAND_DETAIL]] || currentCfMap[ZD.BRAND_DETAIL] || '', after: brandTag || '', api: brandTag ? { id: ZD.BRAND_DETAIL, value: brandTag } : null },
-        { label: '✅전체 주문 (Product Issue, 아크테크X)*', before: currentCfMap[ZD.TOTAL_ORDERS]  || '', after: purchasesVal || '', api: purchasesVal ? { id: ZD.TOTAL_ORDERS, value: purchasesVal } : null },
-        { label: '❎전체 환불*', before: currentCfMap[ZD.TOTAL_REFUNDS] || '', after: refundsVal || '', api: refundsVal ? { id: ZD.TOTAL_REFUNDS, value: refundsVal } : null },
-        { label: '❗사진/영상 유무❗*', before: currentCfMap[ZD.PHOTO_EXIST] || '', after: resolvedHasPhoto != null ? (resolvedHasPhoto ? 'yes' : 'no') : '', api: resolvedHasPhoto != null ? { id: ZD.PHOTO_EXIST, value: resolvedHasPhoto ? 'yes' : 'no' } : null },
+        { label: 'Fulfillment',  before: currentCfMap[ZD.FULFILLMENT]  || '', after: resolvedFulfill?.name || '', api: resolvedFulfill?.val ? { id: ZD.FULFILLMENT, value: resolvedFulfill.val } : null },
+        { label: 'Brand(상세)', before: currentCfMap[ZD.BRAND_DETAIL]  || '', after: brandTag || '', api: brandTag ? { id: ZD.BRAND_DETAIL, value: brandTag } : null },
+        { label: '총 주문 2yr', before: currentCfMap[ZD.TOTAL_ORDERS]  || '', after: purchasesVal || '', api: purchasesVal ? { id: ZD.TOTAL_ORDERS, value: purchasesVal } : null },
+        { label: '총 환불 2yr', before: currentCfMap[ZD.TOTAL_REFUNDS] || '', after: refundsVal || '', api: refundsVal ? { id: ZD.TOTAL_REFUNDS, value: refundsVal } : null },
+        { label: '사진/영상 유무', before: currentCfMap[ZD.PHOTO_EXIST] || '', after: resolvedHasPhoto != null ? (resolvedHasPhoto ? 'yes' : 'no') : '', api: resolvedHasPhoto != null ? { id: ZD.PHOTO_EXIST, value: resolvedHasPhoto ? 'yes' : 'no' } : null },
       ];
 
       // Resolve Product Name "before" using product opts
-      const pnRow = apiOnlyRows.find(r => r.label === 'Product Name *');
+      const pnRow = apiOnlyRows.find(r => r.label === 'Product Name');
       if (pnRow && resolvedProduct?.opts) {
         pnRow.before = resolvedProduct.opts.find(o => o.value === currentCfMap[ZD.PRODUCT_NAME])?.name?.replace(/^[^_]+_/, '') || currentCfMap[ZD.PRODUCT_NAME] || '';
       }
@@ -843,7 +806,6 @@
       if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
 
       showFillConfirm_(allRows, selectedRows => {
-        _gcrFilledThisTicket = true; // track that GCX Reply filled this ticket's fields
         if (btn) { btn.disabled = true; btn.textContent = 'Filling…'; }
 
         // DOM fills first
@@ -875,16 +837,14 @@
       });
     }
 
-    // Async fetches — device opts always fetched (invoice detection needs opts even without product)
-    fetchZdFieldOpts(ZD.DEVICE, opts => {
-      if (deviceLabel) {
+    // Async fetches
+    if (deviceLabel) {
+      fetchZdFieldOpts(ZD.DEVICE, opts => {
         const v = bestDeviceOptVal(opts, deviceLabel, ticketText);
         resolvedDevice = v ? { val: v, name: opts.find(o => o.value === v)?.name || v, opts } : { val: null, name: '', opts };
-      } else {
-        resolvedDevice = { val: null, name: '', opts }; // no product, but keep opts for invoice override
-      }
-      buildAndShow();
-    });
+        buildAndShow();
+      });
+    }
     if (productLabel) {
       fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => {
         const v = bestMatchOptVal(opts, productLabel, true);
@@ -893,7 +853,6 @@
       });
     }
     fetchZdFieldOpts(ZD.FULFILLMENT, opts => {
-      fulfillOpts = opts;
       let fv = null;
       if (skuHasPan) { const o2 = opts.find(x => /pan\s*eu/i.test(x.name)); if (o2) fv = o2.value; }
       if (!fv && fulfillChannel) {
@@ -908,11 +867,7 @@
       method: 'GET',
       url: `https://spigenhelp.zendesk.com/api/v2/tickets/${ticketId}.json`,
       onload(res) {
-        try {
-          const t = JSON.parse(res.responseText).ticket || {};
-          for (const f of (t.custom_fields || [])) currentCfMap[f.id] = f.value || '';
-          ticketSubject = t.subject || '';
-        } catch {}
+        try { for (const f of (JSON.parse(res.responseText).ticket?.custom_fields || [])) currentCfMap[f.id] = f.value || ''; } catch {}
         buildAndShow();
       },
       onerror() { buildAndShow(); },
@@ -940,57 +895,6 @@
         setFillStatus(panel, 'Network error');
       },
     });
-  }
-
-  // ── AI 인입사유 ───────────────────────────────────────────────────────────
-  function fetchAiReason_(review, category) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container || !review) return;
-    const _session = _panelSession;
-    container.innerHTML = `<div style="padding:0 14px;"><div style="font-size:11px;color:#aaa;padding:6px 0;">AI 인입사유 분석 중…</div></div>`;
-    logStep_('AI 인입사유 분석 중…');
-    GM_xmlhttpRequest({
-      method:   'GET',
-      url:      `${GAS_URL}?action=inferReason&review=${encodeURIComponent(review.slice(0, 2000))}&category=${encodeURIComponent(category || '')}`,
-      redirect: 'follow',
-      timeout:  35000,
-      onload(res) {
-        if (_panelSession !== _session || !container.isConnected) return;
-        try {
-          const data = JSON.parse(res.responseText);
-          lastAiReason = data.reason || null;
-          renderAiReason_(lastAiReason);
-          logStep_(`AI 인입사유: ${lastAiReason || '(결과 없음)'}`);
-        } catch { container.innerHTML = ''; }
-      },
-      onerror()   { if (_panelSession === _session) container.innerHTML = ''; },
-      ontimeout() { if (_panelSession === _session) container.innerHTML = ''; },
-    });
-  }
-
-  function renderAiReason_(reason) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container) return;
-    if (!reason) { container.innerHTML = ''; return; }
-    container.innerHTML = `
-      <div style="padding:0 14px 0;">
-        <div class="sp-block" data-sp-section="ai_reason">
-          <div class="sp-block-title" style="color:#7c3aed;border-top:1px solid #e9ebec;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#7c3aed" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2l1.09 6.26L19 6l-4.26 4.91L21 12l-6.26 1.09L19 19l-4.91-4.26L12 21l-1.09-6.26L5 18l4.26-4.91L3 12l6.26-1.09L5 6l4.91 4.26L12 2z"/>
-            </svg>
-            AI 인입사유
-            <span class="sp-chevron">▾</span>
-          </div>
-          <div class="sp-block-body">
-            ${row('인입사유', reason)}
-          </div>
-        </div>
-      </div>`;
-    container.querySelectorAll('.sp-block-title').forEach(t => {
-      t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-    });
-    applySectionState(container);
   }
 
   // ── Product info renderer ────────────────────────────────────────────────
@@ -1114,10 +1018,6 @@
       if (amzResult?.amazonProduct) lastAmazonProduct = amzResult.amazonProduct;
       _productReady = true;  // product lookup finished — enable Auto-Fill Form button
       maybeShowAutoFill(document.getElementById(PANEL_ID));
-
-      const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getTicketBodyText_();
-      if (aiReview) fetchAiReason_(aiReview, aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
@@ -1315,7 +1215,7 @@
     #sp-order-panel {
       position: fixed;
       right: 16px;
-      top: 72px;
+      top: 56px;
       width: 330px;
       min-width: 200px;
       max-width: 700px;
@@ -1649,7 +1549,6 @@
         <div id="sp-notes-section">
           <div id="sp-notes-content"></div>
         </div>
-        <div id="sp-ai-reason-result"></div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
         </div>
@@ -1945,7 +1844,7 @@
   function fetchOrder(orderId, _retries) {
     _retries = _retries || 0;
     const _session = _panelSession;
-    setStatus('Fetching order data…', true);
+    setStatus('Fetching order data…');
     if (!_retries) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
@@ -1959,7 +1858,7 @@
         if (res.responseText.trimStart().startsWith('<')) {
           if (_retries < 2) {
             logStep_(`GAS not ready — retry ${_retries + 1}/2…`);
-            setStatus('Retrying…', true);
+            setStatus('Retrying…');
             setTimeout(() => fetchOrder(orderId, _retries + 1), 2000);
             return;
           }
@@ -2089,15 +1988,11 @@
     });
   }
 
-  const LOADING_GIF = 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Loading_icon.gif?_=20151024034921';
-  function setStatus(msg, isLoading = false) {
-    const html = isLoading
-      ? `<img src="${LOADING_GIF}" style="width:14px;height:14px;vertical-align:middle;margin-right:5px;">${esc(msg)}`
-      : esc(msg);
+  function setStatus(msg) {
     const el = document.getElementById('sp-status');
-    if (el) { el.innerHTML = html; return; }
+    if (el) { el.textContent = msg; return; }
     const result = document.getElementById('sp-result');
-    if (result) result.innerHTML = `<div id="sp-status">${html}</div>`;
+    if (result) result.innerHTML = `<div id="sp-status">${esc(msg)}</div>`;
   }
 
   function logStep_(msg) {
@@ -2241,7 +2136,7 @@
       panel.style.right = 'auto';
     }
     if (_savedUi.y != null) {
-      const clampedY = Math.max(72, Math.min(_savedUi.y, window.innerHeight - 80));
+      const clampedY = Math.max(4, Math.min(_savedUi.y, window.innerHeight - 80));
       panel.style.top = clampedY + 'px';
     }
 
@@ -2351,18 +2246,13 @@
       lastProductData  = null;
       lastAmazonProduct = null;
       _productReady    = false;
-      // Only wipe GCX Reply-filled ZD fields when Auto-Fill was actually confirmed on this
-      // ticket. Clearing unconditionally caused Zendesk's own saved field values to be lost
-      // whenever the agent navigated away and back (regression from v2.7.3).
-      if (_gcrFilledThisTicket) clearAllZdFields_();
-      _gcrFilledThisTicket = false;
+      // Wipe any GCX Reply-filled Zendesk form fields from React state so they don't
+      // survive SPA navigation and get submitted by Zendesk when marking Solved/Pending.
+      clearAllZdFields_();
       const result = document.getElementById('sp-result');
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
       if (productResult) productResult.innerHTML = '';
-      const aiReasonEl = document.getElementById('sp-ai-reason-result');
-      if (aiReasonEl) aiReasonEl.innerHTML = '';
-      lastAiReason = null;
       const chips = document.getElementById('sp-detected-ids');
       if (chips) chips.innerHTML = '';
       const autoBar = panel.querySelector('#sp-autofill-bar');
@@ -2380,9 +2270,7 @@
     }
 
     function autoDetectAll() {
-      const _session = _panelSession;
       getTicketFields((orderId, asin, bodyIds) => {
-        if (_panelSession !== _session) return; // stale callback from prev ticket — discard
         const orderInput = panel.querySelector('#sp-order-input');
         if (orderId && orderInput && !orderInput.value) {
           // Custom field has order ID → use it directly, chips are informational only

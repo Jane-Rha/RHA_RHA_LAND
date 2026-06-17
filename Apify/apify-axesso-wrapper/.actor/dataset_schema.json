@@ -1,0 +1,194 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "statusCode": {
+        "type": "integer",
+        "title": "Status code",
+        "description": "HTTP status code of the scrape request. 200 = review found.",
+        "example": 200
+      },
+      "statusMessage": {
+        "type": "string",
+        "title": "Status message",
+        "description": "FOUND for valid reviews. NO_REVIEWS_PENALTY_x for empty filter combinations.",
+        "example": "FOUND"
+      },
+      "asin": {
+        "type": "string",
+        "title": "ASIN",
+        "description": "Amazon Standard Identification Number of the product.",
+        "example": "B08C1W5N87"
+      },
+      "productTitle": {
+        "type": ["string", "null"],
+        "title": "Product title",
+        "description": "Full title of the Amazon product.",
+        "example": "Example Product Title"
+      },
+      "domainCode": {
+        "type": "string",
+        "title": "Domain",
+        "description": "Amazon marketplace domain code (com, de, co.uk, etc.).",
+        "example": "com"
+      },
+      "currentPage": {
+        "type": "integer",
+        "title": "Page",
+        "description": "Review page number this record was scraped from.",
+        "example": 1
+      },
+      "sortStrategy": {
+        "type": ["string", "null"],
+        "title": "Sort strategy",
+        "description": "Sort order used when fetching reviews (recent or helpful).",
+        "example": "recent"
+      },
+      "countReviews": {
+        "type": ["integer", "null"],
+        "title": "Review count",
+        "description": "Total number of reviews on the product page.",
+        "example": 142
+      },
+      "countRatings": {
+        "type": ["integer", "null"],
+        "title": "Rating count",
+        "description": "Total number of ratings on the product page.",
+        "example": 142
+      },
+      "productRating": {
+        "type": ["string", "null"],
+        "title": "Product rating",
+        "description": "Aggregate star rating shown on the product page.",
+        "example": "4.6 out of 5"
+      },
+      "reviewId": {
+        "type": ["string", "null"],
+        "title": "Review ID",
+        "description": "Unique identifier for this review.",
+        "example": "R2XK8A1LMN4PQ"
+      },
+      "title": {
+        "type": ["string", "null"],
+        "title": "Review title",
+        "description": "Headline text of the review.",
+        "example": "Exactly what I needed"
+      },
+      "text": {
+        "type": ["string", "null"],
+        "title": "Review text",
+        "description": "Full body text of the review.",
+        "example": "Solid build quality. Works exactly as described."
+      },
+      "rating": {
+        "type": ["string", "null"],
+        "title": "Rating",
+        "description": "Star rating given by the reviewer.",
+        "example": "5.0 out of 5 stars"
+      },
+      "date": {
+        "type": ["string", "null"],
+        "title": "Review date",
+        "description": "Date the review was posted, as displayed on Amazon.",
+        "example": "Reviewed in the United States on March 10, 2025"
+      },
+      "userName": {
+        "type": ["string", "null"],
+        "title": "Reviewer name",
+        "description": "Display name of the reviewer.",
+        "example": "J. Mitchell"
+      },
+      "numberOfHelpful": {
+        "type": ["integer", "null"],
+        "title": "Helpful votes",
+        "description": "Number of people who found this review helpful.",
+        "example": 3
+      },
+      "variationId": {
+        "type": ["string", "null"],
+        "title": "Variation ASIN",
+        "description": "ASIN of the specific product variant the reviewer purchased.",
+        "example": "B08C1W5N87"
+      },
+      "variationList": {
+        "type": ["array", "null"],
+        "title": "Variation attributes",
+        "description": "List of variation attribute strings (e.g. color, size).",
+        "example": ["Color: Black", "Size: Large"]
+      },
+      "imageUrlList": {
+        "type": ["array", "null"],
+        "title": "Review images",
+        "description": "List of image URLs attached to the review.",
+        "example": ["https://images-na.ssl-images-amazon.com/example.jpg"]
+      },
+      "videoUrlList": {
+        "type": ["array", "null"],
+        "title": "Review videos",
+        "description": "List of video URLs attached to the review.",
+        "example": []
+      },
+      "verified": {
+        "type": ["boolean", "null"],
+        "title": "Verified purchase",
+        "description": "True if the reviewer is a verified purchaser of the product.",
+        "example": true
+      },
+      "vine": {
+        "type": ["boolean", "null"],
+        "title": "Vine review",
+        "description": "True if the review was submitted through the Amazon Vine program.",
+        "example": false
+      },
+      "profilePath": {
+        "type": ["string", "null"],
+        "title": "Reviewer profile path",
+        "description": "Relative URL path to the reviewer's Amazon profile.",
+        "example": "/gp/profile/amzn1.account.example"
+      }
+    },
+    "required": ["statusCode", "statusMessage", "asin", "domainCode"]
+  },
+  "views": {
+    "overview": {
+      "title": "Reviews",
+      "transformation": {
+        "fields": [
+          "asin",
+          "domainCode",
+          "date",
+          "userName",
+          "rating",
+          "title",
+          "text",
+          "verified",
+          "numberOfHelpful",
+          "reviewId",
+          "productTitle",
+          "countReviews",
+          "productRating"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "asin": { "label": "ASIN", "format": "text" },
+          "domainCode": { "label": "Market", "format": "text" },
+          "date": { "label": "Date", "format": "text" },
+          "userName": { "label": "Reviewer", "format": "text" },
+          "rating": { "label": "Rating", "format": "text" },
+          "title": { "label": "Title", "format": "text" },
+          "text": { "label": "Review", "format": "text" },
+          "verified": { "label": "Verified", "format": "boolean" },
+          "numberOfHelpful": { "label": "Helpful", "format": "number" },
+          "reviewId": { "label": "Review ID", "format": "text" },
+          "productTitle": { "label": "Product", "format": "text" },
+          "countReviews": { "label": "Total Reviews", "format": "number" },
+          "productRating": { "label": "Avg Rating", "format": "text" }
+        }
+      }
+    }
+  }
+}

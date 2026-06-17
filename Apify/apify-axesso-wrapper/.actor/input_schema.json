@@ -1,0 +1,50 @@
+{
+  "title": "Amazon Reviews Scraper (Axesso)",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "input": {
+      "title": "Input Requests",
+      "description": "List of review-scrape requests — identical format to the Axesso actor input. Each entry needs: asin, domainCode, filterByStar, maxPages, sortBy, reviewerType, formatType, mediaType.",
+      "type": "array",
+      "editor": "json",
+      "example": [
+        {
+          "asin": "B0GDHXBK25",
+          "domainCode": "com",
+          "filterByStar": "one_star",
+          "maxPages": 1,
+          "sortBy": "recent",
+          "reviewerType": "all_reviews",
+          "formatType": "current_format",
+          "mediaType": "all_contents"
+        }
+      ]
+    },
+    "maxBudgetUsd": {
+      "title": "Max Budget (USD)",
+      "description": "Optional hard cap on Axesso API spend per run. Leave blank for no cap.",
+      "type": "number",
+      "minimum": 0.01
+    },
+    "filterMode": {
+      "title": "Filter Mode",
+      "description": "Strict (recommended): keep only statusCode=200 + statusMessage=FOUND rows. Lenient: only remove NO_REVIEWS_PENALTY placeholder rows.",
+      "type": "string",
+      "editor": "select",
+      "enum": ["strict", "lenient"],
+      "enumTitles": [
+        "Strict — verified reviews only (recommended)",
+        "Lenient — remove placeholder rows only"
+      ],
+      "default": "strict"
+    },
+    "ownerToken": {
+      "title": "Your Apify API Token",
+      "description": "Your own Apify API token. Required to authorize the Axesso sub-actor call on your behalf. Find it at https://console.apify.com/settings/integrations. Stored securely and never logged.",
+      "type": "string",
+      "editor": "textfield"
+    }
+  },
+  "required": ["input"]
+}

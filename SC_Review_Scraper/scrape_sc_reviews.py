@@ -5,17 +5,18 @@ Edit the USER CONFIG section below, then run:
     python3 scrape_sc_reviews.py
 """
 
-import asyncio, csv, random, os, sys, json
+import asyncio, csv, random, os, sys, json, time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 sys.stdout.reconfigure(line_buffering=True)  # flush every print immediately when running in background
 from playwright.async_api import async_playwright
+import requests
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # USER CONFIG — edit these before each run
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DOMAINS = ["EU", "JP", "US", "IN"]
+DOMAINS = ["US"]
 # List of domains to scrape in parallel. Each gets its own CSV file.
 # Single domain example : DOMAINS = ["US"]
 # Supported             : "US" | "EU" | "UK" | "DE" | "FR" | "IT" | "ES" | "JP" | "IN"
@@ -40,7 +41,7 @@ START_PAGE = 1
 # Page to start from. Set > 1 to resume a previously interrupted run.
 # When resuming, also set APPEND_CSV = True to avoid overwriting saved rows.
 
-APPEND_CSV = True
+APPEND_CSV = False
 # False — overwrites the CSV at the start (default, fresh run).
 # True  — appends to an existing CSV without rewriting the header.
 #          Use together with START_PAGE to resume an interrupted run.
@@ -75,6 +76,15 @@ FETCH_IMAGES_ONLY = False
 # True  — skip all scraping; just re-run the image fetch on existing CSV files.
 #         Use this to recover after a browser crash that interrupted the image fetch.
 #         DOMAINS and OUT_DIR must match the original run so the right CSVs are found.
+
+FETCH_ORDER_ID = False
+# True  — after scraping each domain, call the Seller Central internal API
+#         (brandcustomerreviews/api/reviews) to retrieve the Amazon Order ID for
+#         each verified-purchase review. Adds an 'Order ID' column to the CSV.
+#         ~84 % of DE reviews have an Order ID; non-verified purchases return "".
+#         Chrome must be open with --remote-debugging-port=9222 (same session used
+#         for scraping). No extra login needed — reuses the existing SC cookies.
+# False — skip order ID fetching (default, faster runs).
 
 UPLOAD_TO_SHEETS = False
 # True  — after scraping, upload each domain CSV as a new sheet to SHEETS_SPREADSHEET_ID.
@@ -235,6 +245,7 @@ ALL_HEADERS = [
     'ASIN', 'Created 날짜', '사진 유무', 'Reviewer', 'Review Ratings',
     'Review Title', '본문', 'Product Rating', 'Ratings Count',
     'Domain Code', '국가', 'Review Link', 'Image URL', 'Review ID',
+    'Order ID',   # populated only when FETCH_ORDER_ID = True
 ]
 IDX = {h: i for i, h in enumerate(ALL_HEADERS)}
 
@@ -318,7 +329,7 @@ def _make_extract_js(domain_code, country):
       }}
     }}
     rows.push([childAsin, createdDate, 'N', reviewer, rating, title, body,
-               productRating, ratingsCount, domainCode, countryCode, reviewLink, '', reviewId]);
+               productRating, ratingsCount, domainCode, countryCode, reviewLink, '', reviewId, '']);
   }});
   return rows;
 }}
@@ -669,6 +680,67 @@ async def _enrich_csv_with_images(csv_path, page, prof):
     return total
 
 
+async def _fetch_order_id_map(ctx, domain, mons_params=""):
+    """Call the SC internal reviews API and return {reviewId: orderId} for all pages.
+
+    The API is the same endpoint the brand-customer-reviews UI uses internally.
+    It returns orderId directly per review (no SP-API needed).
+    ~84 % of EU/US reviews have an orderId; non-verified purchases return "".
+    """
+    dc = _DOMAINS[domain]
+    # Derive API base: replace the Playwright brand-reviews UI path with the API path
+    api_base = dc["sc_base"].replace("/brand-customer-reviews/", "/brandcustomerreviews/api/reviews")
+    sc_host  = api_base.split("/")[2]   # e.g. sellercentral-europe.amazon.com
+
+    # Extract cookies from the live Playwright context
+    all_cookies = await ctx.cookies()
+    cookie_dict = {c["name"]: c["value"]
+                   for c in all_cookies
+                   if sc_host in c.get("domain", "")}
+
+    sess = requests.Session()
+    sess.cookies.update(cookie_dict)
+    sess.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Referer":    dc["sc_base"],
+        "Accept":     "application/json, text/plain, */*",
+    })
+
+    order_map  = {}
+    page_id    = 0
+    page_size  = 50
+    total_pages = 1
+
+    while page_id < total_pages:
+        qs = (f"?pageId={page_id}&pageSize={page_size}"
+              f"&sortByType=REVIEW_CREATED_DATE&isAscending=false&includeDone=false")
+        if mons_params:
+            qs += f"&{mons_params}"
+        try:
+            r = sess.get(api_base + qs, timeout=30)
+            if not r.ok:
+                print(f"  WARN order ID API: {r.status_code} on page {page_id}")
+                break
+            data = r.json()
+        except Exception as e:
+            print(f"  WARN order ID API error page {page_id}: {e}")
+            break
+
+        total_pages = data.get("totalPageCount", 1)
+        for rev in data.get("reviews", []):
+            rid = rev.get("reviewId", "")
+            oid = rev.get("orderId") or ""
+            if rid:
+                order_map[rid] = oid
+
+        page_id += 1
+        if page_id < total_pages:
+            time.sleep(0.3)
+
+    return order_map
+
+
 async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, append=False, pages=None, skip_images=False, mkp_params=""):
     """Scrape one domain end-to-end. Returns (total_rows, total_with_imgs).
 
@@ -823,6 +895,23 @@ async def scrape_domain(domain, page, ctx, prof, asin_filter, out_file=None, app
     if len(all_rows) - len(unique):
         print(f"  Dedup           : removed {len(all_rows)-len(unique)} duplicates → {len(unique)} unique")
     all_rows = unique
+
+    # ── Step 2.5: order ID enrichment via SC internal API ────────────────────
+    if FETCH_ORDER_ID:
+        total_reviews = sum(1 for r in all_rows if r[IDX['Review ID']])
+        print(f"  Fetching order IDs via SC API ({total_reviews} reviews) …", end=" ", flush=True)
+        try:
+            order_map = await _fetch_order_id_map(ctx, domain, mkp_params)
+            matched = 0
+            for row in all_rows:
+                rid = row[IDX['Review ID']]
+                oid = order_map.get(rid, "")
+                row[IDX['Order ID']] = oid
+                if oid:
+                    matched += 1
+            print(f"{matched}/{total_reviews} matched ({100*matched/max(total_reviews,1):.0f}%)")
+        except Exception as e:
+            print(f"WARN: order ID fetch failed ({e}) — column left empty")
 
     # ── Step 3: image enrichment (skipped for EU — caller runs _enrich_csv_with_images) ──
     total_with_imgs = 0

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.6
+// @version      2.7.0
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,14 +57,11 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.5';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
   let lastProductData  = null;
   let _panelSession    = 0; // incremented on every resetPanel(); guards stale async callbacks
-  let _productReady    = false; // true once product lookup finishes (or is determined impossible)
-  let _gcrFilledThisTicket = false; // true after Auto-Fill confirmed & submitted on current ticket
 
   // ── UI state persistence ──────────────────────────────────────────────────
   function loadUi() {
@@ -83,7 +80,6 @@
     });
   }
   let lastAmazonProduct = null;
-  let lastAiReason      = null;
 
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
@@ -278,66 +274,6 @@
     return false;
   }
 
-  // All Zendesk text/date field labels that GCX Reply ever writes via fillZdInput.
-  // Used by clearAllZdFields_() to wipe React state on ticket navigation so stale
-  // values from a previous ticket never get submitted when the agent marks Solved/Pending.
-  const ZD_TEXT_FIELD_LABELS = [
-    'Order ID', 'ASIN', '문의SKU', 'Customer Full Name', 'Purchase Date',
-    'Order Status', 'Order Total', 'Delivery Level', '대분류', '생산업체', '원산지정보',
-  ];
-
-  function clearAllZdFields_() {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    const needle_list = ZD_TEXT_FIELD_LABELS.map(normLabel);
-    for (const input of document.querySelectorAll(
-      '[data-test-id="ticket-fields-text-field"], [data-test-id="ticket-fields-date-field"]'
-    )) {
-      if (!input.value) continue; // already empty — skip
-      let node = input.parentElement;
-      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
-        const lbl = node.querySelector('label');
-        if (lbl) {
-          const t = normLabel(lbl.textContent);
-          if (needle_list.some(n => t.startsWith(n))) {
-            setter.call(input, '');
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // Read the current value of a Zendesk React text/date input by label text
-  function readZdInput_(labelText) {
-    const needle = normLabel(labelText);
-    for (const input of document.querySelectorAll(
-      '[data-test-id="ticket-fields-text-field"], [data-test-id="ticket-fields-date-field"]'
-    )) {
-      let node = input.parentElement;
-      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
-        const lbl = node.querySelector('label');
-        if (lbl && normLabel(lbl.textContent).startsWith(needle)) return input.value || '';
-      }
-    }
-    return '';
-  }
-
-  // Returns the actual DOM label text for the ZD field whose label starts with `labelPrefix`.
-  function resolveZdLabel_(labelPrefix) {
-    const needle = normLabel(labelPrefix);
-    for (const input of document.querySelectorAll(
-      '[data-test-id="ticket-fields-text-field"], [data-test-id="ticket-fields-date-field"]'
-    )) {
-      let node = input.parentElement;
-      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
-        const lbl = node.querySelector('label');
-        if (lbl && normLabel(lbl.textContent).startsWith(needle)) return lbl.textContent.trim();
-      }
-    }
-    return null;
-  }
-
   // Fetch Zendesk field options (for Device / Product Name matching)
   function fetchZdFieldOpts(fieldId, cb) {
     GM_xmlhttpRequest({
@@ -455,106 +391,6 @@
     });
   }
 
-  // ── Fill confirmation modal ──────────────────────────────────────────────
-
-  function showFillConfirm_(rows, onConfirm, onCancel) {
-    const overlay = document.createElement('div');
-    overlay.id = 'sp-fill-confirm-overlay';
-    overlay.style.cssText = [
-      'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2147483646',
-      'display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    ].join(';');
-
-    const fillable = rows.filter(r => r.after);
-    const card = document.createElement('div');
-    card.style.cssText = [
-      'background:#fff;border-radius:8px;padding:20px 24px 16px',
-      'max-width:680px;width:94vw;max-height:82vh;overflow-y:auto',
-      'box-shadow:0 8px 40px rgba(0,0,0,0.28);display:flex;flex-direction:column;gap:0',
-    ].join(';');
-
-    function esc_(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-    card.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <span style="font-weight:700;font-size:13px;color:#1f2d3d;">Confirm Auto-Fill</span>
-        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#555;cursor:pointer;user-select:none;">
-          <input type="checkbox" id="sp-chk-all" style="margin:0;cursor:pointer;" ${fillable.length ? 'checked' : ''}> Select all
-        </label>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:11.5px;">
-        <thead>
-          <tr style="border-bottom:2px solid #e4e8ed;">
-            <th style="width:22px;padding:4px 6px;"></th>
-            <th style="text-align:left;padding:4px 8px;color:#888;font-weight:600;white-space:nowrap;">Field</th>
-            <th style="text-align:left;padding:4px 8px;color:#888;font-weight:600;min-width:130px;">Before</th>
-            <th style="text-align:left;padding:4px 8px;color:#888;font-weight:600;min-width:160px;">After</th>
-          </tr>
-        </thead>
-        <tbody id="sp-confirm-tbody">
-          ${rows.map((r, i) => {
-            const hasBefore = r.before && r.before !== r.after;
-            const noChange  = r.before && r.before === r.after;
-            const rowStyle  = noChange ? 'opacity:0.5;' : '';
-            const afterColor = r.after ? (noChange ? '#888' : '#1a6e3a') : '#aaa';
-            return `<tr data-idx="${i}" style="border-bottom:1px solid #f2f4f7;${rowStyle}">
-              <td style="padding:5px 6px;text-align:center;">
-                <input type="checkbox" data-row="${i}" style="margin:0;cursor:pointer;"
-                  ${r.after && !noChange ? 'checked' : ''} ${!r.after ? 'disabled' : ''}>
-              </td>
-              <td style="padding:5px 8px;font-weight:500;color:#1f2d3d;white-space:nowrap;">${esc_(r.label)}</td>
-              <td style="padding:5px 8px;color:#999;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                  title="${esc_(r.before)}">${esc_(r.before) || '<span style="color:#ccc">—</span>'}</td>
-              <td style="padding:5px 8px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${afterColor};font-weight:${r.after && !noChange ? '600' : 'normal'};"
-                  title="${esc_(r.after)}">${esc_(r.after) || '<span style="color:#ccc">—</span>'}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-      <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #eef0f3;">
-        <span id="sp-confirm-count" style="font-size:11px;color:#888;margin-right:auto;"></span>
-        <button id="sp-confirm-cancel" style="padding:6px 16px;border:1px solid #d0d5dd;border-radius:5px;background:#fff;cursor:pointer;font-size:12px;color:#444;">Cancel</button>
-        <button id="sp-confirm-ok" style="padding:6px 16px;border:none;border-radius:5px;background:#2a7a50;color:#fff;cursor:pointer;font-size:12px;font-weight:600;">Fill Selected</button>
-      </div>`;
-
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
-    const allChk  = card.querySelector('#sp-chk-all');
-    const countEl = card.querySelector('#sp-confirm-count');
-    const rowChks = () => [...card.querySelectorAll('input[data-row]:not([disabled])')]
-
-    function refreshCount() {
-      const n = rowChks().filter(c => c.checked).length;
-      countEl.textContent = `${n} field${n !== 1 ? 's' : ''} selected`;
-      card.querySelector('#sp-confirm-ok').disabled = n === 0;
-    }
-    refreshCount();
-
-    allChk.addEventListener('change', () => {
-      rowChks().forEach(c => c.checked = allChk.checked);
-      refreshCount();
-    });
-    card.querySelector('#sp-confirm-tbody').addEventListener('change', e => {
-      if (!e.target.matches('input[data-row]')) return;
-      const all = rowChks();
-      const checkedCount = all.filter(c => c.checked).length;
-      allChk.indeterminate = checkedCount > 0 && checkedCount < all.length;
-      allChk.checked = checkedCount === all.length;
-      refreshCount();
-    });
-
-    card.querySelector('#sp-confirm-cancel').addEventListener('click', () => {
-      overlay.remove(); onCancel?.();
-    });
-    card.querySelector('#sp-confirm-ok').addEventListener('click', () => {
-      const sel = new Set(rowChks().filter(c => c.checked).map(c => +c.dataset.row));
-      overlay.remove();
-      onConfirm(rows.filter((_, i) => sel.has(i)));
-    });
-    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); onCancel?.(); } });
-  }
-
   // ── Auto-fill status helpers ─────────────────────────────────────────────
 
   function setFillStatus(panel, msg) {
@@ -566,16 +402,7 @@
 
   function maybeShowAutoFill(panel) {
     const bar = panel?.querySelector('#sp-autofill-bar');
-    const btn = panel?.querySelector('#sp-autofill-btn');
-    if (bar && lastOrderData) {
-      bar.style.display = 'block';
-      // Only touch button state when not mid-fill (Preparing… / Filling…)
-      if (btn && btn.textContent !== 'Preparing…' && btn.textContent !== 'Filling…') {
-        btn.disabled = !_productReady;
-        btn.textContent = _productReady ? 'Auto-Fill Form' : 'Loading…';
-        btn.title = _productReady ? '' : 'Product info still loading — please wait';
-      }
-    }
+    if (bar && lastOrderData) bar.style.display = 'block';
     const mcfBar = panel?.querySelector('#sp-mcf-bar');
     if (mcfBar && lastOrderData) mcfBar.style.display = 'block';
   }
@@ -724,7 +551,7 @@
     if (!ticketId || !lastOrderData) return;
 
     const btn = panel.querySelector('#sp-autofill-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Filling…'; }
     setFillStatus(panel, '');
 
     const o  = lastOrderData.order   || {};
@@ -734,13 +561,15 @@
 
     const orderId   = panel.querySelector('#sp-order-input')?.value.trim() || '';
     const panelAsin = panel.querySelector('#sp-asin-input')?.value.trim()  || '';
+    // ASIN: prefer order item ASINs, fall back to panel input
     const itemAsins  = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
     const asinValue  = itemAsins.length ? itemAsins.join(', ') : panelAsin;
+    // SKU: prefer order items SellerSKU, fall back to product sheet.
+    // If SellerSKU looks like a barcode (all digits, 8+ chars), prefer sheet SKU — some
+    // Amazon listings use EAN-13 as the seller SKU, which is not a valid Spigen SKU.
     const rawSellerSku = lastOrderData.items?.[0]?.SellerSKU || '';
-    // Sheet SKU (p.SKU) always takes priority. Only accept rawSellerSku when it matches the
-    // Spigen SKU pattern (3 uppercase letters + 5 digits, e.g. "ACH06437", "ACS06557PAN").
-    // Rejects barcodes ("8809613760408"), model names ("PE2213IN 35w"), and non-Spigen codes ("PE2213IN").
-    const itemSku = p.SKU || (!/^[A-Z]{3}\d{5}/.test(rawSellerSku) ? '' : rawSellerSku) || '';
+    const itemSku = (/^\d{8,}$/.test(rawSellerSku) ? (p.SKU || rawSellerSku) : rawSellerSku) || p.SKU || '';
+    // Purchase / refund counts → ✅전체 주문 + ❎전체 환불 dropdowns (recent 2 years)
     const totalPurchases = lastOrderData.totalPurchases ?? lastOrderData.orderCount;
     const totalRefunds   = lastOrderData.totalRefunds;
     const purchasesVal   = totalPurchases != null ? `q${Math.min(totalPurchases, 50)}` : null;
@@ -752,170 +581,80 @@
       ? new Date(purchaseDateIso + 'T00:00:00Z').toLocaleDateString('en-US',
           { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
       : '';
+
+    // 1. DOM fill visible text fields immediately
+    fillZdInput('Order ID',           orderId);
+    fillZdInput('ASIN',               asinValue);
+    fillZdInput('문의SKU',            itemSku);
+    fillZdInput('Customer Full Name', buyerName);
+    // Fill date and close the calendar popup that React opens on focus
+    if (fillZdInput('Purchase Date', purchaseDateDom)) {
+      setTimeout(() => document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      ), 150);
+    }
+    fillZdInput('Order Status',       o.OrderStatus   || '');
+    fillZdInput('Order Total',        orderTotal);
+    fillZdInput('Delivery Level',     o.ShipmentServiceLevelCategory || '');
     const amz = lastAmazonProduct || {};
     const daebunryu  = p['대분류']     || amz['대분류']     || '';
     const saengsan   = p['생산업체']   || amz['생산업체']   || '';
     const originInfo = p['원산지정보'] || amz['원산지정보'] || '';
-    const deviceLabel    = p['기종명'] || '';
-    const productLabel   = p['모델명']  || '';
-    const ticketText     = document.body.innerText || '';
-    // PAN EU detection must check the raw SP-API SellerSKU (e.g. "ACS06557PAN"), NOT the
-    // sheet SKU — the sheet stores the base SKU without the PAN/EUP suffix.
-    const skuHasPan      = /pan|eup/i.test(rawSellerSku);
-    const fulfillChannel = o.FulfillmentChannel || '';
-    const brandTag       = brandFromDaebunryu(p['대분류'] || '');
-    const pop            = salesChannelToPOP(o.SalesChannel);
+    fillZdInput('대분류',     daebunryu);
+    fillZdInput('생산업체',   saengsan);
+    fillZdInput('원산지정보', originInfo);
 
-    // DOM text-field rows — read current values for "before" column
-    const DOM_DEFS = [
-      { label: 'Order ID',           zdId: ZD.ORDER_ID,     after: orderId,           apiVal: orderId },
-      { label: 'ASIN',               zdId: ZD.ASIN,         after: asinValue,          apiVal: asinValue },
-      { label: '문의SKU',            zdId: ZD.SKU,          after: itemSku,            apiVal: itemSku },
-      { label: 'Customer Full Name', zdId: ZD.CUST_NAME,    after: buyerName,          apiVal: buyerName },
-      { label: 'Purchase Date',      zdId: ZD.PURCHASE_DATE,after: purchaseDateDom,    apiVal: purchaseDateIso, isDate: true },
-      { label: 'Order Status',       zdId: ZD.ORDER_STATUS, after: o.OrderStatus||'',  apiVal: o.OrderStatus||'' },
-      { label: 'Order Total',        zdId: ZD.ORDER_TOTAL,  after: orderTotal,         apiVal: orderTotal },
-      { label: 'Delivery Level',     zdId: ZD.DELIVERY_LVL, after: o.ShipmentServiceLevelCategory||'', apiVal: o.ShipmentServiceLevelCategory||'' },
-      { label: '대분류',             zdId: ZD.DAEBUNRYU,    after: daebunryu,          apiVal: daebunryu },
-      { label: '생산업체',           zdId: ZD.SAENGSAN,     after: saengsan,           apiVal: saengsan },
-      { label: '원산지정보',         zdId: ZD.ORIGIN_INFO,  after: originInfo,         apiVal: originInfo },
-    ];
-    const textRows = DOM_DEFS.map(d => ({
-      label: resolveZdLabel_(d.label) || d.label, before: readZdInput_(d.label), after: d.after,
-      dom: d, // carry definition for execution phase
-    }));
+    // 2. Build Zendesk API fields array
+    const af = [];
+    if (orderId)                             af.push({ id: ZD.ORDER_ID,      value: orderId });
+    if (asinValue)                           af.push({ id: ZD.ASIN,          value: asinValue });
+    if (itemSku)                             af.push({ id: ZD.SKU,           value: itemSku });
+    if (purchasesVal) af.push({ id: ZD.TOTAL_ORDERS,  value: purchasesVal });
+    if (refundsVal)   af.push({ id: ZD.TOTAL_REFUNDS, value: refundsVal });
+    if (buyerName)                           af.push({ id: ZD.CUST_NAME,     value: buyerName });
+    if (o.OrderStatus)                       af.push({ id: ZD.ORDER_STATUS,  value: o.OrderStatus });
+    if (orderTotal)                          af.push({ id: ZD.ORDER_TOTAL,   value: orderTotal });
+    if (o.ShipmentServiceLevelCategory)      af.push({ id: ZD.DELIVERY_LVL, value: o.ShipmentServiceLevelCategory });
+    if (purchaseDateIso)                     af.push({ id: ZD.PURCHASE_DATE, value: purchaseDateIso });
+    if (COUNTRY_MAP[ad.CountryCode])         af.push({ id: ZD.COUNTRY,       value: COUNTRY_MAP[ad.CountryCode] });
+    const pop = salesChannelToPOP(o.SalesChannel);
+    if (pop)                                 af.push({ id: ZD.POINT_OF_PUR,  value: pop });
+    if (daebunryu)   af.push({ id: ZD.DAEBUNRYU,  value: daebunryu });
+    if (saengsan)    af.push({ id: ZD.SAENGSAN,   value: saengsan });
+    if (originInfo)  af.push({ id: ZD.ORIGIN_INFO, value: originInfo });
 
-    // Async-resolved rows (Device, Product Name, Fulfillment, Photo, API-only fields)
-    let resolvedDevice   = null; // { val, name, opts }
-    let resolvedProduct  = null; // { val, name }
-    let resolvedFulfill  = null; // { val, name }
-    let fulfillOpts      = [];   // all fulfillment opts — for before display name
-    let resolvedHasPhoto = null;
-    let currentCfMap     = {};   // fieldId → raw value from current ticket
-    let ticketSubject    = '';   // captured from ticket JSON — used for invoice detection
+    // 3. Brand(상세) from 대분류 — sync, push before async ops
+    const brandTag = brandFromDaebunryu(p['대분류'] || '');
+    if (brandTag) af.push({ id: ZD.BRAND_DETAIL, value: brandTag });
 
-    // Always fetch device opts (was conditional on deviceLabel); needed for invoice override
-    let remain = 1 + (productLabel ? 1 : 0) + 3; // device + fulfillment + comments + ticket
+    // 4. Async: Device + Product Name + Fulfillment + comments (photo check) → then PUT
+    const deviceLabel      = p['기종명'] || '';
+    const productLabel     = p['모델명']  || '';
+    const ticketText       = document.body.innerText || '';
+    const skuHasPan        = /pan|eup/i.test(itemSku);
+    const fulfillChannel   = o.FulfillmentChannel || '';
 
-    const BRAND_TAG_LABEL = {
-      spigen_case_: 'CASE', spigen_sp_: 'SP', spigen_sda_: 'SDA',
-      'spigen_pacc._': 'PAcc.', spigen_new_biz_: 'Newbiz', 'n/a': 'n/a',
-    };
+    let remain = (deviceLabel ? 1 : 0) + (productLabel ? 1 : 0) + 1 + 1; // +1 comments, +1 fulfillment
+    function tryPut() { if (--remain <= 0) putZdTicket(ticketId, af, btn, panel); }
 
-    function buildAndShow() {
-      if (--remain > 0) return;
-
-      // Invoice ticket override: if subject contains "invoice", force Device to the invoice option
-      if (/invoice/i.test(ticketSubject) && resolvedDevice?.opts) {
-        const invoiceOpt = resolvedDevice.opts.find(o => /invoice/i.test(o.name));
-        if (invoiceOpt) resolvedDevice = { val: invoiceOpt.value, name: invoiceOpt.name, opts: resolvedDevice.opts };
-      }
-
-      // Refresh textRows "before" from ZD API (currentCfMap) — more reliable than DOM snapshot
-      for (const row of textRows) {
-        const cf = currentCfMap[row.dom.zdId];
-        if (cf !== undefined) row.before = cf;
-      }
-
-      // API-only rows (no DOM text field counterpart)
-      const apiOnlyRows = [
-        { label: 'Device*', before: resolvedDevice?.opts?.find(o => o.value === currentCfMap[ZD.DEVICE])?.name || currentCfMap[ZD.DEVICE] || '',
-          after: resolvedDevice?.name || '', api: resolvedDevice?.val ? { id: ZD.DEVICE, value: resolvedDevice.val } : null },
-        { label: 'Product Name *', before: '', // resolved below using product opts
-          after: resolvedProduct?.name || '', api: resolvedProduct?.val ? { id: ZD.PRODUCT_NAME, value: resolvedProduct.val } : null },
-        { label: 'Country*',      before: currentCfMap[ZD.COUNTRY]     || '', after: COUNTRY_MAP[ad.CountryCode] || '', api: COUNTRY_MAP[ad.CountryCode] ? { id: ZD.COUNTRY, value: COUNTRY_MAP[ad.CountryCode] } : null },
-        { label: 'Point of Purchase', before: currentCfMap[ZD.POINT_OF_PUR] || '', after: pop || '', api: pop ? { id: ZD.POINT_OF_PUR, value: pop } : null },
-        { label: 'Amazon Fulfillment Methods*', before: fulfillOpts.find(o => o.value === currentCfMap[ZD.FULFILLMENT])?.name || currentCfMap[ZD.FULFILLMENT] || '', after: resolvedFulfill?.name || '', api: resolvedFulfill?.val ? { id: ZD.FULFILLMENT, value: resolvedFulfill.val } : null },
-        { label: 'Brand(상세)*', before: BRAND_TAG_LABEL[currentCfMap[ZD.BRAND_DETAIL]] || currentCfMap[ZD.BRAND_DETAIL] || '', after: brandTag || '', api: brandTag ? { id: ZD.BRAND_DETAIL, value: brandTag } : null },
-        { label: '✅전체 주문 (Product Issue, 아크테크X)*', before: currentCfMap[ZD.TOTAL_ORDERS]  || '', after: purchasesVal || '', api: purchasesVal ? { id: ZD.TOTAL_ORDERS, value: purchasesVal } : null },
-        { label: '❎전체 환불*', before: currentCfMap[ZD.TOTAL_REFUNDS] || '', after: refundsVal || '', api: refundsVal ? { id: ZD.TOTAL_REFUNDS, value: refundsVal } : null },
-        { label: '❗사진/영상 유무❗*', before: currentCfMap[ZD.PHOTO_EXIST] || '', after: resolvedHasPhoto != null ? (resolvedHasPhoto ? 'yes' : 'no') : '', api: resolvedHasPhoto != null ? { id: ZD.PHOTO_EXIST, value: resolvedHasPhoto ? 'yes' : 'no' } : null },
-      ];
-
-      // Resolve Product Name "before" using product opts
-      const pnRow = apiOnlyRows.find(r => r.label === 'Product Name *');
-      if (pnRow && resolvedProduct?.opts) {
-        pnRow.before = resolvedProduct.opts.find(o => o.value === currentCfMap[ZD.PRODUCT_NAME])?.name?.replace(/^[^_]+_/, '') || currentCfMap[ZD.PRODUCT_NAME] || '';
-      }
-
-      const allRows = [...textRows, ...apiOnlyRows];
-
-      if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
-
-      showFillConfirm_(allRows, selectedRows => {
-        _gcrFilledThisTicket = true; // track that GCX Reply filled this ticket's fields
-        if (btn) { btn.disabled = true; btn.textContent = 'Filling…'; }
-
-        // DOM fills first
-        let dispatchEsc = false;
-        for (const r of selectedRows) {
-          if (!r.dom) continue;
-          fillZdInput(r.dom.label, r.dom.after);
-          if (r.dom.isDate && r.dom.after) dispatchEsc = true;
-        }
-        if (dispatchEsc) {
-          setTimeout(() => document.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-          ), 150);
-        }
-
-        // Build API payload from selected rows
-        const af = [];
-        for (const r of selectedRows) {
-          if (r.api?.value) { af.push(r.api); continue; }
-          if (!r.dom) continue;
-          // DOM rows also write via API
-          const v = r.dom.label === 'Purchase Date' ? r.dom.apiVal : r.dom.after;
-          if (v) af.push({ id: r.dom.zdId, value: v });
-        }
-
-        putZdTicket(ticketId, af, btn, panel);
-      }, () => {
-        if (btn) { btn.disabled = false; btn.textContent = 'Auto-Fill Form'; }
-      });
-    }
-
-    // Async fetches — device opts always fetched (invoice detection needs opts even without product)
-    fetchZdFieldOpts(ZD.DEVICE, opts => {
-      if (deviceLabel) {
-        const v = bestDeviceOptVal(opts, deviceLabel, ticketText);
-        resolvedDevice = v ? { val: v, name: opts.find(o => o.value === v)?.name || v, opts } : { val: null, name: '', opts };
-      } else {
-        resolvedDevice = { val: null, name: '', opts }; // no product, but keep opts for invoice override
-      }
-      buildAndShow();
-    });
-    if (productLabel) {
-      fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => {
-        const v = bestMatchOptVal(opts, productLabel, true);
-        resolvedProduct = { val: v, name: v ? opts.find(o => o.value === v)?.name?.replace(/^[^_]+_/, '') || v : '', opts };
-        buildAndShow();
-      });
-    }
+    if (deviceLabel)  fetchZdFieldOpts(ZD.DEVICE,       opts => { const v = bestDeviceOptVal(opts, deviceLabel, ticketText);  if (v) af.push({ id: ZD.DEVICE,       value: v }); tryPut(); });
+    if (productLabel) fetchZdFieldOpts(ZD.PRODUCT_NAME, opts => { const v = bestMatchOptVal(opts, productLabel, true);         if (v) af.push({ id: ZD.PRODUCT_NAME, value: v }); tryPut(); });
     fetchZdFieldOpts(ZD.FULFILLMENT, opts => {
-      fulfillOpts = opts;
       let fv = null;
-      if (skuHasPan) { const o2 = opts.find(x => /pan\s*eu/i.test(x.name)); if (o2) fv = o2.value; }
-      if (!fv && fulfillChannel) {
-        const kw = fulfillChannel === 'AFN' ? 'fba' : fulfillChannel === 'MFN' ? 'merchant' : null;
-        if (kw) { const o2 = opts.find(x => x.name.toLowerCase().startsWith(kw)); if (o2) fv = o2.value; }
+      if (skuHasPan) {
+        const opt = opts.find(x => /pan\s*eu/i.test(x.name));
+        if (opt) fv = opt.value;
       }
-      resolvedFulfill = fv ? { val: fv, name: opts.find(o => o.value === fv)?.name || fv } : null;
-      buildAndShow();
+      if (!fv && fulfillChannel) {
+        const keyword = fulfillChannel === 'AFN' ? 'fba' : fulfillChannel === 'MFN' ? 'merchant' : null;
+        if (keyword) { const opt = opts.find(x => x.name.toLowerCase().startsWith(keyword)); if (opt) fv = opt.value; }
+      }
+      if (fv) af.push({ id: ZD.FULFILLMENT, value: fv });
+      tryPut();
     });
-    fetchTicketComments(ticketId, hasPhoto => { resolvedHasPhoto = hasPhoto; buildAndShow(); });
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: `https://spigenhelp.zendesk.com/api/v2/tickets/${ticketId}.json`,
-      onload(res) {
-        try {
-          const t = JSON.parse(res.responseText).ticket || {};
-          for (const f of (t.custom_fields || [])) currentCfMap[f.id] = f.value || '';
-          ticketSubject = t.subject || '';
-        } catch {}
-        buildAndShow();
-      },
-      onerror() { buildAndShow(); },
+    fetchTicketComments(ticketId, hasPhoto => {
+      af.push({ id: ZD.PHOTO_EXIST, value: hasPhoto ? 'yes' : 'no' });
+      tryPut();
     });
   }
 
@@ -940,57 +679,6 @@
         setFillStatus(panel, 'Network error');
       },
     });
-  }
-
-  // ── AI 인입사유 ───────────────────────────────────────────────────────────
-  function fetchAiReason_(review, category) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container || !review) return;
-    const _session = _panelSession;
-    container.innerHTML = `<div style="padding:0 14px;"><div style="font-size:11px;color:#aaa;padding:6px 0;">AI 인입사유 분석 중…</div></div>`;
-    logStep_('AI 인입사유 분석 중…');
-    GM_xmlhttpRequest({
-      method:   'GET',
-      url:      `${GAS_URL}?action=inferReason&review=${encodeURIComponent(review.slice(0, 2000))}&category=${encodeURIComponent(category || '')}`,
-      redirect: 'follow',
-      timeout:  35000,
-      onload(res) {
-        if (_panelSession !== _session || !container.isConnected) return;
-        try {
-          const data = JSON.parse(res.responseText);
-          lastAiReason = data.reason || null;
-          renderAiReason_(lastAiReason);
-          logStep_(`AI 인입사유: ${lastAiReason || '(결과 없음)'}`);
-        } catch { container.innerHTML = ''; }
-      },
-      onerror()   { if (_panelSession === _session) container.innerHTML = ''; },
-      ontimeout() { if (_panelSession === _session) container.innerHTML = ''; },
-    });
-  }
-
-  function renderAiReason_(reason) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container) return;
-    if (!reason) { container.innerHTML = ''; return; }
-    container.innerHTML = `
-      <div style="padding:0 14px 0;">
-        <div class="sp-block" data-sp-section="ai_reason">
-          <div class="sp-block-title" style="color:#7c3aed;border-top:1px solid #e9ebec;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#7c3aed" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2l1.09 6.26L19 6l-4.26 4.91L21 12l-6.26 1.09L19 19l-4.91-4.26L12 21l-1.09-6.26L5 18l4.26-4.91L3 12l6.26-1.09L5 6l4.91 4.26L12 2z"/>
-            </svg>
-            AI 인입사유
-            <span class="sp-chevron">▾</span>
-          </div>
-          <div class="sp-block-body">
-            ${row('인입사유', reason)}
-          </div>
-        </div>
-      </div>`;
-    container.querySelectorAll('.sp-block-title').forEach(t => {
-      t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-    });
-    applySectionState(container);
   }
 
   // ── Product info renderer ────────────────────────────────────────────────
@@ -1112,12 +800,7 @@
       // Store Amazon product for fallback (대분류/생산업체/원산지정보 may be empty in sheet)
       const amzResult = valid.find(r => r.amazonProduct);
       if (amzResult?.amazonProduct) lastAmazonProduct = amzResult.amazonProduct;
-      _productReady = true;  // product lookup finished — enable Auto-Fill Form button
       maybeShowAutoFill(document.getElementById(PANEL_ID));
-
-      const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getTicketBodyText_();
-      if (aiReview) fetchAiReason_(aiReview, aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
@@ -1315,7 +998,7 @@
     #sp-order-panel {
       position: fixed;
       right: 16px;
-      top: 72px;
+      top: 56px;
       width: 330px;
       min-width: 200px;
       max-width: 700px;
@@ -1621,7 +1304,6 @@
           <path d="M6 40 Q24 48 42 40" stroke="#FF9900" stroke-width="3" fill="none" stroke-linecap="round"/>
         </svg>
         GCX Reply
-        <span style="font-size:9.5px;font-weight:normal;color:#bbb;margin-left:3px;vertical-align:middle;letter-spacing:0.3px;">v${SCRIPT_VER}</span>
         <span id="sp-minimize-btn" title="Minimize">─</span>
         <span id="sp-panel-close" title="Close">✕</span>
       </div>
@@ -1649,7 +1331,6 @@
         <div id="sp-notes-section">
           <div id="sp-notes-content"></div>
         </div>
-        <div id="sp-ai-reason-result"></div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
         </div>
@@ -1806,7 +1487,6 @@
         </div>
         <div class="sp-block-body">
           ${rowLinked('Amazon Order ID', orderId, sellerCentralUrl(orderId, o.SalesChannel, ad.CountryCode))}
-          ${row('Seller SKU',       it[0]?.SellerSKU || '')}
           ${row('Order Status',     o.OrderStatus)}
           ${row('Purchase Date',    fmtPurchaseDate_(o.PurchaseDate, ad.CountryCode))}
           ${row('Amount',           amount)}
@@ -1945,7 +1625,7 @@
   function fetchOrder(orderId, _retries) {
     _retries = _retries || 0;
     const _session = _panelSession;
-    setStatus('Fetching order data…', true);
+    setStatus('Fetching order data…');
     if (!_retries) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
@@ -1959,7 +1639,7 @@
         if (res.responseText.trimStart().startsWith('<')) {
           if (_retries < 2) {
             logStep_(`GAS not ready — retry ${_retries + 1}/2…`);
-            setStatus('Retrying…', true);
+            setStatus('Retrying…');
             setTimeout(() => fetchOrder(orderId, _retries + 1), 2000);
             return;
           }
@@ -2026,24 +1706,8 @@
           } else if (resolvedAsin) {
             logStep_(`Product lookup: ${resolvedAsin}`);
             renderAllProducts([resolvedAsin]);
-            // SP-API items were blocked → also fetch SC in parallel just to get SellerSKU
-            // (product lookup already started above with the known ASIN — don't block it)
-            if (data.itemsStatus !== 200) {
-              fetchScItems(orderId, data.order?.SalesChannel, data.address?.CountryCode, scItems => {
-                if (_panelSession !== _session || !result.isConnected) return;
-                if (scItems && scItems.length) {
-                  lastOrderData.items = scItems;
-                  result.innerHTML = renderOrder(Object.assign({}, lastOrderData, { items: scItems }), orderId, resolvedAsin);
-                  result.querySelectorAll('.sp-block-title').forEach(t => {
-                    t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-                  });
-                  applySectionState(result);
-                  maybeShowAutoFill(document.getElementById(PANEL_ID));
-                }
-              });
-            }
           } else if (data.itemsStatus !== 200) {
-            // SP-API items blocked AND no ASIN → query Seller Central for ASIN + SellerSKU
+            // SP-API items blocked → query Seller Central orders-api silently with user's SC session
             const asinValEl = result.querySelector('.sp-row .sp-val');
             if (asinValEl) asinValEl.textContent = 'Seller Central…';
             fetchScItems(orderId, data.order?.SalesChannel, data.address?.CountryCode, scItems => {
@@ -2057,18 +1721,10 @@
                   t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
                 });
                 applySectionState(result);
-                renderAllProducts(newAsins); // finish() will set _productReady = true
-                maybeShowAutoFill(document.getElementById(PANEL_ID));
-              } else {
-                // SC returned no items → no product lookup possible → enable button now
-                _productReady = true;
+                renderAllProducts(newAsins);
                 maybeShowAutoFill(document.getElementById(PANEL_ID));
               }
             });
-          } else {
-            // No ASIN detected and items were accessible but empty → no product lookup → enable now
-            _productReady = true;
-            maybeShowAutoFill(document.getElementById(PANEL_ID));
           }
         } catch (err) {
           setStatus('Parse error: ' + err.message);
@@ -2089,15 +1745,11 @@
     });
   }
 
-  const LOADING_GIF = 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Loading_icon.gif?_=20151024034921';
-  function setStatus(msg, isLoading = false) {
-    const html = isLoading
-      ? `<img src="${LOADING_GIF}" style="width:14px;height:14px;vertical-align:middle;margin-right:5px;">${esc(msg)}`
-      : esc(msg);
+  function setStatus(msg) {
     const el = document.getElementById('sp-status');
-    if (el) { el.innerHTML = html; return; }
+    if (el) { el.textContent = msg; return; }
     const result = document.getElementById('sp-result');
-    if (result) result.innerHTML = `<div id="sp-status">${html}</div>`;
+    if (result) result.innerHTML = `<div id="sp-status">${esc(msg)}</div>`;
   }
 
   function logStep_(msg) {
@@ -2241,7 +1893,7 @@
       panel.style.right = 'auto';
     }
     if (_savedUi.y != null) {
-      const clampedY = Math.max(72, Math.min(_savedUi.y, window.innerHeight - 80));
+      const clampedY = Math.max(4, Math.min(_savedUi.y, window.innerHeight - 80));
       panel.style.top = clampedY + 'px';
     }
 
@@ -2350,19 +2002,10 @@
       lastOrderData    = null;
       lastProductData  = null;
       lastAmazonProduct = null;
-      _productReady    = false;
-      // Only wipe GCX Reply-filled ZD fields when Auto-Fill was actually confirmed on this
-      // ticket. Clearing unconditionally caused Zendesk's own saved field values to be lost
-      // whenever the agent navigated away and back (regression from v2.7.3).
-      if (_gcrFilledThisTicket) clearAllZdFields_();
-      _gcrFilledThisTicket = false;
       const result = document.getElementById('sp-result');
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
       if (productResult) productResult.innerHTML = '';
-      const aiReasonEl = document.getElementById('sp-ai-reason-result');
-      if (aiReasonEl) aiReasonEl.innerHTML = '';
-      lastAiReason = null;
       const chips = document.getElementById('sp-detected-ids');
       if (chips) chips.innerHTML = '';
       const autoBar = panel.querySelector('#sp-autofill-bar');
@@ -2380,9 +2023,7 @@
     }
 
     function autoDetectAll() {
-      const _session = _panelSession;
       getTicketFields((orderId, asin, bodyIds) => {
-        if (_panelSession !== _session) return; // stale callback from prev ticket — discard
         const orderInput = panel.querySelector('#sp-order-input');
         if (orderId && orderInput && !orderInput.value) {
           // Custom field has order ID → use it directly, chips are informational only

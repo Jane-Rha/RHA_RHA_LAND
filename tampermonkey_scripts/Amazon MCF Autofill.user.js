@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Amazon MCF Autofill
-// @version      1.0.8
-// @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.meta.js
+// @version      1.2.1
+// @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @downloadURL  https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/Amazon%20MCF%20Autofill.user.js
 // @match        https://sellercentral.amazon.*/mcf/orders/create-order*
 // @match        https://sellercentral-europe.amazon.*/mcf/orders/create-order*
@@ -139,15 +139,17 @@
     }
   }
 
-  const setByLabel = (label, v) =>
-    v
-      ? setKatInput(
-          [...document.querySelectorAll('kat-input')].find(
-            k => (k.getAttribute('label') || '').trim().toLowerCase() === label.toLowerCase()
-          ),
-          v
-        )
-      : false;
+  // Try multiple label candidates (English + Korean) — whichever matches the current SC language
+  const setByAnyLabel = (labels, v) => {
+    if (!v) return false;
+    const allKat = [...document.querySelectorAll('kat-input')];
+    const el = allKat.find(k =>
+      labels.some(lbl => (k.getAttribute('label') || '').trim().toLowerCase() === lbl.toLowerCase())
+    );
+    return el ? setKatInput(el, v) : false;
+  };
+
+  const setByLabel = (label, v) => setByAnyLabel([label], v);
 
   const setById = (id, v) =>
     v ? setKatInput(document.getElementById(id), v) : false;
@@ -158,7 +160,8 @@
     if (!code) return false;
     const upper = code.toUpperCase().replace(/^UK$/, 'GB').replace(/^EL$/, 'GR');
 
-    const dd = document.querySelector('kat-dropdown[label="Country"]');
+    const dd = document.querySelector('kat-dropdown[label="Country"]') ||
+               document.querySelector('kat-dropdown[label="국가"]');
     if (!dd) { LOG('Country dropdown not found.'); return false; }
 
     const sr = dd.shadowRoot;
@@ -256,7 +259,14 @@
   // CLIPBOARD PARSER (stable)
   // ---------------------------------
   function parseClipboard(txt) {
-    const t = txt
+    // The GCX Reply panel is appended to document.body end, so when the agent does
+    // Cmd+A+C on the Zendesk ticket page the panel text (including "Return ASIN B0...")
+    // appears after the ticket content. Strip it to prevent the SP-API ASIN (the
+    // originally ordered product) from overriding the ticket's replacement ASIN.
+    const gcxStart = txt.search(/(?:^|\n)GCX Reply\b/);
+    const raw = gcxStart > 0 ? txt.slice(0, gcxStart) : txt;
+
+    const t = raw
       .replace(/\r/g, '')
       .replace(/[–—]/g, '-')
       .replace(/\u00A0/g, ' ')
@@ -346,7 +356,7 @@
     for (const el of labels) {
       const attrText = (el.getAttribute('text') || '').trim().toLowerCase();
       const txt = (el.textContent || '').trim().toLowerCase();
-      const isExpedited = attrText === 'expedited' || /\bexpedited\b/.test(txt);
+      const isExpedited = attrText === 'expedited' || /\bexpedited\b/.test(txt) || txt.includes('빠른 배송');
       if (!isExpedited) continue;
 
       const nativeLabel = el.querySelector('label[for]');
@@ -527,11 +537,13 @@ async function fetchOrderIdByEmail(email) {
   // ---------------------------------
   // ORDER ID SETTER
   // ---------------------------------
+  const _isOrderIdLabel = (lbl) =>
+    lbl.includes('order id') || lbl.includes('merchant order id') || lbl.includes('주문 id');
+
   function isOrderIdFilled() {
-    const kat = [...document.querySelectorAll('kat-input')].find(k => {
-      const lbl = (k.getAttribute('label') || '').trim().toLowerCase();
-      return lbl.includes('order id') || lbl.includes('merchant order id');
-    });
+    const kat = [...document.querySelectorAll('kat-input')].find(k =>
+      _isOrderIdLabel((k.getAttribute('label') || '').trim().toLowerCase())
+    );
     if (kat && (kat.value || kat.getAttribute('value'))) return true;
 
     const inner = document.querySelector(
@@ -545,10 +557,9 @@ async function fetchOrderIdByEmail(email) {
   function setOrderIdInput(v) {
     if (!v) return false;
 
-    const kat = [...document.querySelectorAll('kat-input')].find(k => {
-      const lbl = (k.getAttribute('label') || '').trim().toLowerCase();
-      return lbl.includes('order id') || lbl.includes('merchant order id');
-    });
+    const kat = [...document.querySelectorAll('kat-input')].find(k =>
+      _isOrderIdLabel((k.getAttribute('label') || '').trim().toLowerCase())
+    );
 
     if (kat) return setKatInput(kat, v);
 
@@ -579,14 +590,18 @@ async function fetchOrderIdByEmail(email) {
         return;
       }
 
-      // Parse fulfillable count from each result row
+      // Parse fulfillable count from each result row; exclude amzn.* internal SKUs
       const entries = components.map(comp => {
         const qtyEl = comp.querySelector('.search-result-component-quantity');
         const text = (qtyEl ? qtyEl.textContent : '').trim();
         const m = text.match(/([\d,]+)\s+fulfillable/i);
         const count = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
         return { count, comp };
-      });
+      }).filter(({ comp }) => !/\bamzn[.\-]/i.test(comp.textContent || ''));
+      if (!entries.length) {
+        if (attempts > 60) { clearInterval(timer); LOG('autoSelectBestSku: only amzn.* SKUs found, nothing to select.'); }
+        return;
+      }
       entries.sort((a, b) => b.count - a.count);
       const best = entries[0];
 
@@ -631,15 +646,15 @@ async function fetchOrderIdByEmail(email) {
   function fillAll({ name, street, city, state, postal, phone, email, country, countryRaw, q }) {
     let ok = false;
 
-    ok = setByLabel('Full name',        name)   || ok;
-    ok = setByLabel('Street address',   street) || ok;
-    ok = setByLabel('City',             city)   || ok;
-    ok = setByLabel('State / Province', state)  || ok;
-    ok = setByLabel('Postcode',         postal) || ok;
-    ok = setByLabel('Phone number',     phone)  || ok;
+    ok = setByAnyLabel(['Full name',        '전체 이름'],          name)   || ok;
+    ok = setByAnyLabel(['Street address',   '상세 주소'],          street) || ok;
+    ok = setByAnyLabel(['City',             '도시'],               city)   || ok;
+    ok = setByAnyLabel(['State / Province', '시/도'],             state)  || ok;
+    ok = setByAnyLabel(['Postcode',         '우편번호'],           postal) || ok;
+    ok = setByAnyLabel(['Phone number',     '전화번호'],           phone)  || ok;
 
     if (email) {
-      ok = setByLabel('Email address', email) || ok;
+      ok = setByAnyLabel(['Email address',  '이메일 주소'], email) || ok;
       setById('katal-id-9', email);
     }
 
@@ -723,6 +738,48 @@ async function fetchOrderIdByEmail(email) {
   // Bind UI button
   ui.querySelector('#mcf-clip').onclick = pasteFromClipboard;
 
+  // ── 클립보드 붙여넣기 이벤트 (Ctrl+V 전역) ──────────────────────────────
+  // Reads from e.clipboardData directly — no browser clipboard permission needed.
+  // Works on Windows PCs where navigator.clipboard.readText() silently fails.
+  document.addEventListener('paste', async (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text/plain') || '';
+    if (!text) return;
+
+    // Only intercept if content looks like MCF ticket data
+    const looksLikeMcf =
+      /\b(B[A-Z0-9]{9})\b/.test(text) ||           // ASIN
+      /\bSKU\b/i.test(text) ||
+      /^\s*1[.)]\s+.{3,}/m.test(text) ||            // numbered address block starting with 1.
+      (/Country.*:/i.test(text) && /\d{4,}/.test(text)); // country + postal code
+
+    if (!looksLikeMcf) return; // Not ticket data — let native paste proceed
+
+    // Prevent pasting raw text into whatever was focused
+    e.preventDefault();
+
+    const d = parseClipboard(text);
+    if (!d.name && !d.q && !d.email) return;
+
+    msg('클립보드 자동입력 중…');
+    fillAll(d);
+
+    if (d.q) autoSelectBestSku();
+    if (d.country && d.countryRaw?.toLowerCase() !== 'united kingdom') {
+      setTimeout(() => setCountry(d.country), 800);
+    }
+    if (d.email) {
+      msg('시트 업데이트 중…');
+      const orderId = await markRowMcfByEmail(d.email);
+      if (orderId) {
+        setOrderIdInput(orderId);
+        msg('Order ID 자동입력 완료: ' + orderId);
+      } else {
+        msg('시트 업데이트 완료 (Order ID 없음)');
+      }
+    }
+    ensureExpeditedAfterReady();
+  });
+
   // ── URL 해시 브릿지: Zendesk GCX Reply → MCF 자동입력 ───────────────────
   async function autoFillFromUrlHash() {
     const hash = sessionStorage.getItem('_spigen_mcf_hash') || '';
@@ -752,10 +809,7 @@ async function fetchOrderIdByEmail(email) {
       msg('입력 중…');
       if (d.asin) autoSelectBestSku();
       if (d.country) setTimeout(() => setCountry(d.country), 800);
-      if (d.orderId) {
-        if (d.email) markRowMcfByEmail(d.email);
-        setTimeout(() => { setOrderIdInput(d.orderId); msg('✓ Zendesk 자동입력 완료'); }, 1200);
-      } else if (d.email) {
+      if (d.email) {
         msg('시트 업데이트 중…');
         const orderId = await markRowMcfByEmail(d.email);
         if (orderId) { setOrderIdInput(orderId); msg('✓ Zendesk 자동입력 완료'); }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.6
+// @version      2.8.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -57,7 +57,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.5';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.8.2';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -83,7 +83,6 @@
     });
   }
   let lastAmazonProduct = null;
-  let lastAiReason      = null;
 
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
@@ -737,10 +736,10 @@
     const itemAsins  = (lastOrderData.items || []).map(i => i.ASIN).filter(Boolean);
     const asinValue  = itemAsins.length ? itemAsins.join(', ') : panelAsin;
     const rawSellerSku = lastOrderData.items?.[0]?.SellerSKU || '';
-    // Sheet SKU (p.SKU) always takes priority. Only accept rawSellerSku when it matches the
-    // Spigen SKU pattern (3 uppercase letters + 5 digits, e.g. "ACH06437", "ACS06557PAN").
-    // Rejects barcodes ("8809613760408"), model names ("PE2213IN 35w"), and non-Spigen codes ("PE2213IN").
-    const itemSku = p.SKU || (!/^[A-Z]{3}\d{5}/.test(rawSellerSku) ? '' : rawSellerSku) || '';
+    // Sheet SKU (p.SKU) is the canonical Spigen SKU and always takes priority.
+    // SellerSKU from Amazon can be EAN barcodes (all-digit 8+) or space-containing model names
+    // (e.g. "PE2213IN 35w") that are not valid Spigen SKUs — exclude both categories.
+    const itemSku = p.SKU || (/^\d{8,}$/.test(rawSellerSku) || /\s/.test(rawSellerSku) ? '' : rawSellerSku) || '';
     const totalPurchases = lastOrderData.totalPurchases ?? lastOrderData.orderCount;
     const totalRefunds   = lastOrderData.totalRefunds;
     const purchasesVal   = totalPurchases != null ? `q${Math.min(totalPurchases, 50)}` : null;
@@ -942,57 +941,6 @@
     });
   }
 
-  // ── AI 인입사유 ───────────────────────────────────────────────────────────
-  function fetchAiReason_(review, category) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container || !review) return;
-    const _session = _panelSession;
-    container.innerHTML = `<div style="padding:0 14px;"><div style="font-size:11px;color:#aaa;padding:6px 0;">AI 인입사유 분석 중…</div></div>`;
-    logStep_('AI 인입사유 분석 중…');
-    GM_xmlhttpRequest({
-      method:   'GET',
-      url:      `${GAS_URL}?action=inferReason&review=${encodeURIComponent(review.slice(0, 2000))}&category=${encodeURIComponent(category || '')}`,
-      redirect: 'follow',
-      timeout:  35000,
-      onload(res) {
-        if (_panelSession !== _session || !container.isConnected) return;
-        try {
-          const data = JSON.parse(res.responseText);
-          lastAiReason = data.reason || null;
-          renderAiReason_(lastAiReason);
-          logStep_(`AI 인입사유: ${lastAiReason || '(결과 없음)'}`);
-        } catch { container.innerHTML = ''; }
-      },
-      onerror()   { if (_panelSession === _session) container.innerHTML = ''; },
-      ontimeout() { if (_panelSession === _session) container.innerHTML = ''; },
-    });
-  }
-
-  function renderAiReason_(reason) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container) return;
-    if (!reason) { container.innerHTML = ''; return; }
-    container.innerHTML = `
-      <div style="padding:0 14px 0;">
-        <div class="sp-block" data-sp-section="ai_reason">
-          <div class="sp-block-title" style="color:#7c3aed;border-top:1px solid #e9ebec;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#7c3aed" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2l1.09 6.26L19 6l-4.26 4.91L21 12l-6.26 1.09L19 19l-4.91-4.26L12 21l-1.09-6.26L5 18l4.26-4.91L3 12l6.26-1.09L5 6l4.91 4.26L12 2z"/>
-            </svg>
-            AI 인입사유
-            <span class="sp-chevron">▾</span>
-          </div>
-          <div class="sp-block-body">
-            ${row('인입사유', reason)}
-          </div>
-        </div>
-      </div>`;
-    container.querySelectorAll('.sp-block-title').forEach(t => {
-      t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-    });
-    applySectionState(container);
-  }
-
   // ── Product info renderer ────────────────────────────────────────────────
 
   function renderProductInfo(asin) {
@@ -1114,10 +1062,6 @@
       if (amzResult?.amazonProduct) lastAmazonProduct = amzResult.amazonProduct;
       _productReady = true;  // product lookup finished — enable Auto-Fill Form button
       maybeShowAutoFill(document.getElementById(PANEL_ID));
-
-      const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getTicketBodyText_();
-      if (aiReview) fetchAiReason_(aiReview, aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
@@ -1649,7 +1593,6 @@
         <div id="sp-notes-section">
           <div id="sp-notes-content"></div>
         </div>
-        <div id="sp-ai-reason-result"></div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
         </div>
@@ -1945,7 +1888,7 @@
   function fetchOrder(orderId, _retries) {
     _retries = _retries || 0;
     const _session = _panelSession;
-    setStatus('Fetching order data…', true);
+    setStatus('Fetching order data…');
     if (!_retries) logStep_(`Fetching order ${orderId}…`);
     GM_xmlhttpRequest({
       method:   'GET',
@@ -1959,7 +1902,7 @@
         if (res.responseText.trimStart().startsWith('<')) {
           if (_retries < 2) {
             logStep_(`GAS not ready — retry ${_retries + 1}/2…`);
-            setStatus('Retrying…', true);
+            setStatus('Retrying…');
             setTimeout(() => fetchOrder(orderId, _retries + 1), 2000);
             return;
           }
@@ -2089,15 +2032,11 @@
     });
   }
 
-  const LOADING_GIF = 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Loading_icon.gif?_=20151024034921';
-  function setStatus(msg, isLoading = false) {
-    const html = isLoading
-      ? `<img src="${LOADING_GIF}" style="width:14px;height:14px;vertical-align:middle;margin-right:5px;">${esc(msg)}`
-      : esc(msg);
+  function setStatus(msg) {
     const el = document.getElementById('sp-status');
-    if (el) { el.innerHTML = html; return; }
+    if (el) { el.textContent = msg; return; }
     const result = document.getElementById('sp-result');
-    if (result) result.innerHTML = `<div id="sp-status">${html}</div>`;
+    if (result) result.innerHTML = `<div id="sp-status">${esc(msg)}</div>`;
   }
 
   function logStep_(msg) {
@@ -2360,9 +2299,6 @@
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
       if (productResult) productResult.innerHTML = '';
-      const aiReasonEl = document.getElementById('sp-ai-reason-result');
-      if (aiReasonEl) aiReasonEl.innerHTML = '';
-      lastAiReason = null;
       const chips = document.getElementById('sp-detected-ids');
       if (chips) chips.innerHTML = '';
       const autoBar = panel.querySelector('#sp-autofill-bar');
@@ -2380,9 +2316,7 @@
     }
 
     function autoDetectAll() {
-      const _session = _panelSession;
       getTicketFields((orderId, asin, bodyIds) => {
-        if (_panelSession !== _session) return; // stale callback from prev ticket — discard
         const orderInput = panel.querySelector('#sp-order-input');
         if (orderId && orderInput && !orderInput.value) {
           // Custom field has order ID → use it directly, chips are informational only

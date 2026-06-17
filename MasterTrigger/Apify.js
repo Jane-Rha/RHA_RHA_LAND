@@ -23,18 +23,18 @@ const APIFY_TASKS = {
     taskId: 'cskwDlRo3TY9TLsiQ',
     sheetPrefix: '유지훈P'
   },
-  Pixel10a: {
-    taskId: 'I8884GTT3Tgthg9o4',
-    sheetPrefix: 'Pixel10a'
-  },
-  Glx26: {
-    taskId: 'pC2bYPkR0ios64mfd',
-    sheetPrefix: 'Glx26'
-  },
-  iPh17e: {
-    taskId: '28mpJFHAWAdv80g1V',
-    sheetPrefix: 'iPh17e'
-  }
+  // Pixel10a: {
+  //   taskId: 'I8884GTT3Tgthg9o4',
+  //   sheetPrefix: 'Pixel10a'
+  // },
+  // Glx26: {
+  //   taskId: 'pC2bYPkR0ios64mfd',
+  //   sheetPrefix: 'Glx26'
+  // },
+  // iPh17e: {
+  //   taskId: '28mpJFHAWAdv80g1V',
+  //   sheetPrefix: 'iPh17e'
+  // }
 };
 
 /*************************************************

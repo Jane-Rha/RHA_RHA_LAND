@@ -444,15 +444,11 @@ function _processFilterSheet_(srcSS, cfg) {
       Logger.log(`  [1-5점] Skipped Review ID paste — pasteReviewId: false`);
     }
 
-    const kwIdx      = _colIdx(d15Hdr, "키워드 (AI 요약)");
-    const bodyLetter = bodyColIdx >= 0 ? _colLetter(bodyColIdx + 1) : "G";
-    if (kwIdx >= 0) {
-      dest15.getRange(destLast + 1, kwIdx + 1, rows.length, 1).setFormulas(
-        rows.map((_, i) => {
-          const n = destLast + 1 + i;
-          return [`=ai("briefly summarize input which is customer's amazon product review of our(Spigen) product. max 10 words in english only",${bodyLetter}${n})`];
-        })
-      );
+    const kwIdx = _colIdx(d15Hdr, "키워드 (AI 요약)");
+    if (kwIdx >= 0 && bodyColIdx >= 0) {
+      const kwValues = filtered.map(r => [_summarizeReview_(String(r[bodyColIdx] || '').trim())]);
+      dest15.getRange(destLast + 1, kwIdx + 1, rows.length, 1).setValues(kwValues);
+      Logger.log(`  [1-5점] Wrote 키워드 AI summaries for ${kwValues.length} row(s)`);
     }
 
     const updIdx = _colIdx(d15Hdr, "Update 날짜") >= 0
@@ -489,23 +485,23 @@ function _processFilterSheet_(srcSS, cfg) {
       Logger.log(`  [1-3점] 본문→${bonmunLetter}, 대분류→${daebunLetter}, 인입사유(AI) col: ${aiIdx13}, Review ID col: ${destRidIdx13}`);
 
       if (drFormula && updIdx13 >= 0 && aiIdx13 >= 0) {
+        const defectCats = _loadDefectCategories_(destSS);
         let count = 0;
         for (let i = 1; i < d13All.length; i++) {
           const row    = d13All[i];
           const rowNum = i + 1;
           if (_koreanDate(row[updIdx13]).includes(todayKorean) &&
               String(row[aiIdx13]||"").trim() === "") {
-            dest13.getRange(rowNum, aiIdx13 + 1).setFormula(
-              `=dr(${bonmunLetter}${rowNum},${daebunLetter}${rowNum})`
-            );
-            count++;
+            const body   = bonmunIdx >= 0 ? String(row[bonmunIdx] || '').trim() : '';
+            const result = _classifyReview_(body, defectCats);
+            if (result) { dest13.getRange(rowNum, aiIdx13 + 1).setValue(result); count++; }
           }
         }
-        Logger.log(`  [1-3점] Set 인입사유(AI) =dr() for ${count} row(s)`);
+        Logger.log(`  [1-3점] Classified 인입사유(AI) for ${count} row(s) via direct Gemini call`);
       } else if (!drFormula) {
-        Logger.log(`  [1-3점] Skipped =dr() — drFormula: false for ${filterSheet}`);
+        Logger.log(`  [1-3점] Skipped DR classify — drFormula: false for ${filterSheet}`);
       } else {
-        Logger.log(`  [1-3점] Skipped =dr() — updIdx13: ${updIdx13}, aiIdx13: ${aiIdx13}`);
+        Logger.log(`  [1-3점] Skipped DR classify — updIdx13: ${updIdx13}, aiIdx13: ${aiIdx13}`);
       }
 
       // Review ID in 1-3점: same direct-value approach — find today's new rows
@@ -677,10 +673,14 @@ function _processTo13_(srcSS, cfg) {
     }
 
     if (drFormula && aiIdx >= 0) {
-      dest13.getRange(2, aiIdx + 1, rows.length, 1).setFormulas(
-        rows.map((_, i) => [`=dr(${bonmunLetter}${2 + i},${daebunLetter}${2 + i})`])
-      );
-      Logger.log(`  [${filterSheet}] Set =dr() for ${rows.length} new rows (insertAtTop)`);
+      const defectCats = _loadDefectCategories_(destSS);
+      const newData    = dest13.getRange(2, 1, rows.length, dest13.getLastColumn()).getValues();
+      const aiValues   = newData.map(row => {
+        const body = bonmunIdx >= 0 ? String(row[bonmunIdx] || '').trim() : '';
+        return [_classifyReview_(body, defectCats)];
+      });
+      dest13.getRange(2, aiIdx + 1, rows.length, 1).setValues(aiValues);
+      Logger.log(`  [${filterSheet}] Classified 인입사유(AI) for ${rows.length} new rows (insertAtTop)`);
     }
 
   } else {
@@ -717,10 +717,14 @@ function _processTo13_(srcSS, cfg) {
     }
 
     if (drFormula && aiIdx >= 0) {
-      dest13.getRange(destLast + 1, aiIdx + 1, rows.length, 1).setFormulas(
-        rows.map((_, i) => [`=dr(${bonmunLetter}${destLast + 1 + i},${daebunLetter}${destLast + 1 + i})`])
-      );
-      Logger.log(`  [${filterSheet}] Set =dr() for ${rows.length} new rows (bottom-append)`);
+      const defectCats = _loadDefectCategories_(destSS);
+      const newData    = dest13.getRange(destLast + 1, 1, rows.length, dest13.getLastColumn()).getValues();
+      const aiValues   = newData.map(row => {
+        const body = bonmunIdx >= 0 ? String(row[bonmunIdx] || '').trim() : '';
+        return [_classifyReview_(body, defectCats)];
+      });
+      dest13.getRange(destLast + 1, aiIdx + 1, rows.length, 1).setValues(aiValues);
+      Logger.log(`  [${filterSheet}] Classified 인입사유(AI) for ${rows.length} new rows (bottom-append)`);
     }
   }
 
@@ -760,4 +764,140 @@ function _koreanDate(val) {
     return `${kst.getUTCFullYear()}. ${kst.getUTCMonth()+1}. ${kst.getUTCDate()}`;
   }
   return String(val||"").trim();
+}
+
+// ── Gemini helpers (replaces live =ai() / =dr() formula writes) ───────────────
+
+function _callGeminiMaster_(prompt, maxOutputTokens) {
+  const EMPTY = { text: '', inputTokens: 0, outputTokens: 0 };
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) { Logger.log('[Master] Missing GEMINI_API_KEY'); return EMPTY; }
+  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: maxOutputTokens || 50 }
+      };
+      const res = UrlFetchApp.fetch(url, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify(payload), muteHttpExceptions: true
+      });
+      if (res.getResponseCode() !== 200) continue;
+      const json  = JSON.parse(res.getContentText());
+      const text  = (json.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+      if (!text) continue;
+      const usage = json.usageMetadata || {};
+      return { text, inputTokens: usage.promptTokenCount || 0, outputTokens: usage.candidatesTokenCount || 0 };
+    } catch (e) {
+      Logger.log('[_callGeminiMaster_] ' + e.message);
+    }
+  }
+  return EMPTY;
+}
+
+function _summarizeReview_(bodyText) {
+  if (!bodyText || !bodyText.trim()) return '';
+  const r = _callGeminiMaster_(
+    `Briefly summarize this customer Amazon product review of a Spigen product. Max 10 words, English only.\n\nReview:\n${bodyText.trim()}`,
+    30
+  );
+  Logger.log(`[kw-summary] in=${r.inputTokens} out=${r.outputTokens} → "${r.text.slice(0, 40)}"`);
+  return r.text;
+}
+
+function _loadDefectCategories_(ss) {
+  const sh = ss.getSheetByName('Defect');
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues()
+    .filter(r => r[1])
+    .map(r => `${String(r[1]).trim()}: ${String(r[2] || '').trim()}`);
+}
+
+/**
+ * One-time fix: scans all 4 DR-enabled destination sheets and replaces
+ * any live =dr() formula cells with their current static display value.
+ * Run manually once from the GAS editor — safe to re-run (idempotent).
+ */
+function fixLegacyDRFormulas() {
+  const TARGETS = [
+    { id: '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g', name: 'Glx26',    sheets: ['1-3점', '1-5점'] },
+    { id: '16xRJHH7Ynii4erNOn_905ST4CZs6OLpOYTof4uqsGsQ',  name: 'iPh17e',   sheets: ['1-3점', '1-5점'] },
+    { id: '1BpeGq5gIr4tNsPZmnHr19NNY6pQ6sb2_H-v3V9-It4E',  name: 'Pixel10a', sheets: ['1-3점', '1-5점'] },
+    { id: '1dlY6q8trbVMVJAjw_OUoxp1cguA2oTB8WlPhHR01xIw',  name: '유지훈P',  sheets: ['1-3점'] },
+  ];
+  let grandTotal = 0;
+
+  for (const target of TARGETS) {
+    const ss = SpreadsheetApp.openById(target.id);
+    for (const shName of target.sheets) {
+      try {
+        const sh = ss.getSheetByName(shName);
+        if (!sh || sh.getLastRow() < 2) {
+          Logger.log(`[${target.name}/${shName}] skip — no data`);
+          continue;
+        }
+        const lastRow = sh.getLastRow();
+        const lastCol = sh.getLastColumn();
+        const range    = sh.getRange(2, 1, lastRow - 1, lastCol);
+        const formulas = range.getFormulas();
+        const display  = range.getDisplayValues();
+
+        // Find every column that contains at least one =dr() formula
+        const drCols = new Set();
+        for (let r = 0; r < formulas.length; r++) {
+          for (let c = 0; c < formulas[r].length; c++) {
+            if (formulas[r][c].toLowerCase().startsWith('=dr(')) drCols.add(c);
+          }
+        }
+        if (drCols.size === 0) {
+          Logger.log(`[${target.name}/${shName}] no =dr() formulas — clean`);
+          continue;
+        }
+
+        let count = 0;
+        for (const c of drCols) {
+          const colVals = formulas.map((row, r) => {
+            if (row[c].toLowerCase().startsWith('=dr(')) {
+              count++;
+              const v = display[r][c];
+              return [v && !v.startsWith('#') ? v : ''];
+            }
+            return [display[r][c]];
+          });
+          sh.getRange(2, c + 1, lastRow - 1, 1).setValues(colVals);
+        }
+        SpreadsheetApp.flush();
+        Logger.log(`[${target.name}/${shName}] replaced ${count} =dr() formula(s) → static`);
+        grandTotal += count;
+      } catch (e) {
+        Logger.log(`[${target.name}/${shName}] ERROR: ${e.message}`);
+      }
+    }
+  }
+  Logger.log(`fixLegacyDRFormulas complete — total replaced: ${grandTotal}`);
+}
+
+function _classifyReview_(bodyText, enrichedCategories) {
+  if (!bodyText || !bodyText.trim() || !enrichedCategories.length) return '';
+  const prompt = `You are classifying customer feedback into predefined categories.
+Each category has:
+- label
+- description
+Choose the MOST appropriate label.
+
+Categories:
+${enrichedCategories.join('\n')}
+
+Rules:
+- Return ONLY ONE label
+- Return ONLY the label text
+- No explanation, no punctuation, no quotes, no markdown
+
+Input:
+${bodyText.trim()}`;
+  const r = _callGeminiMaster_(prompt, 20);
+  Logger.log(`[dr-classify] in=${r.inputTokens} out=${r.outputTokens} → "${r.text.slice(0, 40)}"`);
+  return r.text;
 }

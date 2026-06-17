@@ -1,0 +1,12 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Amazon Reviews Scraper Output",
+  "properties": {
+    "reviews": {
+      "title": "Scraped reviews",
+      "type": "string",
+      "description": "Dataset containing all scraped and verified Amazon reviews.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    }
+  }
+}

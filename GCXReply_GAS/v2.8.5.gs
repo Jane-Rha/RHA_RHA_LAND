@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.6
+// @version      2.8.5
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -83,7 +83,6 @@
     });
   }
   let lastAmazonProduct = null;
-  let lastAiReason      = null;
 
   // ── Zendesk API: read order ID + ASIN from ticket custom fields ──────────
   function getTicketFields(cb) {
@@ -942,57 +941,6 @@
     });
   }
 
-  // ── AI 인입사유 ───────────────────────────────────────────────────────────
-  function fetchAiReason_(review, category) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container || !review) return;
-    const _session = _panelSession;
-    container.innerHTML = `<div style="padding:0 14px;"><div style="font-size:11px;color:#aaa;padding:6px 0;">AI 인입사유 분석 중…</div></div>`;
-    logStep_('AI 인입사유 분석 중…');
-    GM_xmlhttpRequest({
-      method:   'GET',
-      url:      `${GAS_URL}?action=inferReason&review=${encodeURIComponent(review.slice(0, 2000))}&category=${encodeURIComponent(category || '')}`,
-      redirect: 'follow',
-      timeout:  35000,
-      onload(res) {
-        if (_panelSession !== _session || !container.isConnected) return;
-        try {
-          const data = JSON.parse(res.responseText);
-          lastAiReason = data.reason || null;
-          renderAiReason_(lastAiReason);
-          logStep_(`AI 인입사유: ${lastAiReason || '(결과 없음)'}`);
-        } catch { container.innerHTML = ''; }
-      },
-      onerror()   { if (_panelSession === _session) container.innerHTML = ''; },
-      ontimeout() { if (_panelSession === _session) container.innerHTML = ''; },
-    });
-  }
-
-  function renderAiReason_(reason) {
-    const container = document.getElementById('sp-ai-reason-result');
-    if (!container) return;
-    if (!reason) { container.innerHTML = ''; return; }
-    container.innerHTML = `
-      <div style="padding:0 14px 0;">
-        <div class="sp-block" data-sp-section="ai_reason">
-          <div class="sp-block-title" style="color:#7c3aed;border-top:1px solid #e9ebec;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#7c3aed" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2l1.09 6.26L19 6l-4.26 4.91L21 12l-6.26 1.09L19 19l-4.91-4.26L12 21l-1.09-6.26L5 18l4.26-4.91L3 12l6.26-1.09L5 6l4.91 4.26L12 2z"/>
-            </svg>
-            AI 인입사유
-            <span class="sp-chevron">▾</span>
-          </div>
-          <div class="sp-block-body">
-            ${row('인입사유', reason)}
-          </div>
-        </div>
-      </div>`;
-    container.querySelectorAll('.sp-block-title').forEach(t => {
-      t.addEventListener('click', e => { e.stopPropagation(); t.closest('.sp-block').classList.toggle('collapsed'); });
-    });
-    applySectionState(container);
-  }
-
   // ── Product info renderer ────────────────────────────────────────────────
 
   function renderProductInfo(asin) {
@@ -1114,10 +1062,6 @@
       if (amzResult?.amazonProduct) lastAmazonProduct = amzResult.amazonProduct;
       _productReady = true;  // product lookup finished — enable Auto-Fill Form button
       maybeShowAutoFill(document.getElementById(PANEL_ID));
-
-      const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getTicketBodyText_();
-      if (aiReview) fetchAiReason_(aiReview, aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
@@ -1649,7 +1593,6 @@
         <div id="sp-notes-section">
           <div id="sp-notes-content"></div>
         </div>
-        <div id="sp-ai-reason-result"></div>
         <div id="sp-result">
           <div id="sp-status">Scanning ticket for order IDs…</div>
         </div>
@@ -2360,9 +2303,6 @@
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
       if (productResult) productResult.innerHTML = '';
-      const aiReasonEl = document.getElementById('sp-ai-reason-result');
-      if (aiReasonEl) aiReasonEl.innerHTML = '';
-      lastAiReason = null;
       const chips = document.getElementById('sp-detected-ids');
       if (chips) chips.innerHTML = '';
       const autoBar = panel.querySelector('#sp-autofill-bar');
