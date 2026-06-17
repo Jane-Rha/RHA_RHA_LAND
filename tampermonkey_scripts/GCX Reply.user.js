@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.7
+// @version      2.8.8
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -958,11 +958,12 @@
         if (_panelSession !== _session || !container.isConnected) return;
         try {
           const data = JSON.parse(res.responseText);
+          if (data.error) logStep_(`AI GAS오류: ${data.error}`);
           lastAiReason = data.reason || null;
           renderAiReason_(lastAiReason);
           logStep_(`AI 인입사유: ${lastAiReason || '(결과 없음)'}`);
         } catch (err) {
-          container.innerHTML = '';
+          renderAiReason_(null);
           logStep_(`AI 인입사유 오류: JSON파싱실패 — ${res.responseText.slice(0, 120)}`);
         }
       },
@@ -982,19 +983,20 @@
   function renderAiReason_(reason) {
     const container = document.getElementById('sp-ai-reason-result');
     if (!container) return;
-    if (!reason) { container.innerHTML = ''; return; }
+    const color = reason ? '#7c3aed' : '#9ca3af';
+    const fill  = reason ? '#7c3aed' : '#9ca3af';
     container.innerHTML = `
       <div style="padding:0 14px 0;">
         <div class="sp-block" data-sp-section="ai_reason">
-          <div class="sp-block-title" style="color:#7c3aed;border-top:1px solid #e9ebec;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="#7c3aed" xmlns="http://www.w3.org/2000/svg">
+          <div class="sp-block-title" style="color:${color};border-top:1px solid #e9ebec;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="${fill}" xmlns="http://www.w3.org/2000/svg">
               <path d="M12 2l1.09 6.26L19 6l-4.26 4.91L21 12l-6.26 1.09L19 19l-4.91-4.26L12 21l-1.09-6.26L5 18l4.26-4.91L3 12l6.26-1.09L5 6l4.91 4.26L12 2z"/>
             </svg>
             AI 인입사유
             <span class="sp-chevron">▾</span>
           </div>
           <div class="sp-block-body">
-            ${row('인입사유', reason)}
+            ${row('인입사유', reason || '(분류 불가)')}
           </div>
         </div>
       </div>`;

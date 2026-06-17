@@ -478,19 +478,23 @@ function inferReason_(text, category) {
   const cacheKey = DR_CACHE_VERSION + Utilities.base64Encode(text + '|' + category).slice(0, 100);
   const cache    = CacheService.getScriptCache();
   const hit      = cache.get(cacheKey);
-  if (hit) return hit;
+  if (hit) { Logger.log('inferReason cache hit: ' + hit); return hit; }
 
   const { rawList, list, enrichedList } = loadDefectDataDR_(category);
+  Logger.log(`loadDefectData: rawList.length=${rawList.length}, category="${category}"`);
   if (!rawList.length) return '';
 
   const fast = drKeyword_(text);
+  Logger.log(`drKeyword: "${fast}"`);
   if (fast && rawList.includes(fast)) { cache.put(cacheKey, fast, DR_CACHE_TTL); return fast; }
 
   let output = '';
   for (const model of GEMINI_MODELS_DR) {
     const r = callGeminiDR_(text, enrichedList, model);
+    Logger.log(`Gemini [${model}]: "${r}"`);
     if (r && r.trim()) { output = r.replace(/["'\n\r]/g, '').trim(); break; }
   }
+  Logger.log(`gemini output: "${output}"`);
   if (!output) return '';
 
   const norm = drNorm_(output);
@@ -500,17 +504,22 @@ function inferReason_(text, category) {
   const li = list.findIndex(v => norm.includes(v) || v.includes(norm));
   if (li  !== -1) { cache.put(cacheKey, rawList[li],  DR_CACHE_TTL); return rawList[li]; }
 
+  Logger.log(`no match found for norm="${norm}", list=${JSON.stringify(list.slice(0,5))}`);
   return '';
 }
 
 function loadDefectDataDR_(category) {
   const sh = SpreadsheetApp.openById(DEFECT_SS_ID).getSheetByName(DEFECT_SHEET_NAME);
-  if (!sh) return { rawList: [], list: [], enrichedList: [] };
+  if (!sh) { Logger.log('loadDefectData: sheet not found'); return { rawList: [], list: [], enrichedList: [] }; }
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return { rawList: [], list: [], enrichedList: [] };
 
-  const rows     = sh.getRange(2, 1, lastRow - 1, 3).getValues();
-  const filtered = rows.filter(r => (!category || String(r[0]).trim() === category) && r[1]);
+  const rows = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+  let filtered = rows.filter(r => (!category || String(r[0]).trim() === category) && r[1]);
+  if (!filtered.length && category) {
+    Logger.log(`loadDefectData: no rows for category="${category}", using all`);
+    filtered = rows.filter(r => r[1]);
+  }
 
   const rawList      = filtered.map(r => String(r[1]).trim());
   const list         = rawList.map(drNorm_);
@@ -525,7 +534,7 @@ function loadDefectDataDR_(category) {
 function callGeminiDR_(text, enrichedList, model) {
   try {
     const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
-    if (!apiKey) return '';
+    if (!apiKey) { Logger.log('callGeminiDR: GEMINI_API_KEY not set'); return ''; }
     const prompt =
       `You are classifying customer feedback into predefined categories.\n\nCategories:\n${enrichedList.join('\n')}\n\nRules:\n- Return ONLY ONE label\n- Return ONLY the label text\n- No explanation, punctuation, quotes, or markdown\n\nInput:\n${text}`;
     const res = UrlFetchApp.fetch(
@@ -534,14 +543,22 @@ function callGeminiDR_(text, enrichedList, model) {
         method: 'post', contentType: 'application/json', muteHttpExceptions: true,
         payload: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 20, thinkingConfig: { thinkingBudget: 0 } },
+          generationConfig: { temperature: 0, maxOutputTokens: 20 },
         }),
       }
     );
-    if (res.getResponseCode() !== 200) return '';
+    if (res.getResponseCode() !== 200) {
+      Logger.log(`callGeminiDR [${model}] HTTP ${res.getResponseCode()}: ${res.getContentText().slice(0, 200)}`);
+      return '';
+    }
     const json = JSON.parse(res.getContentText());
     return (json.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
-  } catch { return ''; }
+  } catch (e) { Logger.log('callGeminiDR error: ' + e.message); return ''; }
+}
+
+function testInferReason() {
+  Logger.log('=== testInferReason ===');
+  Logger.log(JSON.stringify({ reason: inferReason_('this case is too thick and heavy', '') }));
 }
 
 function drKeyword_(text) {
