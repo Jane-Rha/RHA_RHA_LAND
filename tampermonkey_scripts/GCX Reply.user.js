@@ -2,7 +2,7 @@
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
 
-// @version      2.9.1
+// @version      2.9.2
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -972,6 +972,7 @@
     const _session = _panelSession;
     container.innerHTML = `<div style="padding:0 14px;"><div style="font-size:11px;color:#aaa;padding:6px 0;">AI 인입사유 분석 중…</div></div>`;
     logStep_('AI 인입사유 분석 중…');
+    logStep_('AI 입력텍스트: ' + review.slice(0, 300).replace(/\n+/g, ' / '));
     GM_xmlhttpRequest({
       method:   'GET',
       url:      `${GAS_URL}?action=inferReason&review=${encodeURIComponent(review.slice(0, 2000))}&category=${encodeURIComponent(category || '')}`,
