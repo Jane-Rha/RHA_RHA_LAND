@@ -484,10 +484,6 @@ function inferReason_(text, category) {
   Logger.log(`loadDefectData: rawList.length=${rawList.length}, category="${category}"`);
   if (!rawList.length) return '';
 
-  const fast = drKeyword_(text);
-  Logger.log(`drKeyword: "${fast}"`);
-  if (fast && rawList.includes(fast)) { cache.put(cacheKey, fast, DR_CACHE_TTL); return fast; }
-
   let output = '';
   for (const model of GEMINI_MODELS_DR) {
     const r = callGeminiDR_(text, enrichedList, model);
@@ -536,7 +532,7 @@ function callGeminiDR_(text, enrichedList, model) {
     const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
     if (!apiKey) { Logger.log('callGeminiDR: GEMINI_API_KEY not set'); return ''; }
     const prompt =
-      `You are classifying customer feedback into predefined categories.\n\nCategories:\n${enrichedList.join('\n')}\n\nRules:\n- Return ONLY ONE label\n- Return ONLY the label text\n- No explanation, punctuation, quotes, or markdown\n\nInput:\n${text}`;
+      `You are classifying a customer service ticket into ONE predefined category.\n\nThe input may contain:\n- The customer's original message (English, Spanish, French, German, or other languages)\n- A Korean summary written by the support team (after "[CS요약]")\n\nUse ALL available context to determine the most accurate category.\n\nCategories:\n${enrichedList.join('\n')}\n\nRules:\n- Return ONLY the exact label text from the list above\n- No explanation, punctuation, quotes, or markdown\n\nInput:\n${text}`;
     const res = UrlFetchApp.fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {

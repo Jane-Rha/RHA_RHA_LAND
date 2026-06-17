@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.8
+// @version      2.8.9
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -588,6 +588,28 @@
     return (pane.innerText || '') + '\n' + inputText;
   }
 
+  // ── AI 인입사유용 텍스트 추출 (고객 메시지 + Spigen CS 요약) ─────────────────
+  function getAiInputText_() {
+    const m = location.pathname.match(/\/tickets\/(\d+)/);
+    const pane = (m && document.querySelector(`[data-test-id="ticket-${m[1]}-standard-layout"]`)) || document.body;
+    const full = (pane.innerText || '').replace(/[ \t]+/g, ' ').trim();
+    if (!full) return '';
+
+    const CS_NAME = 'Spigen Customer Service';
+    const csIdx   = full.indexOf(CS_NAME);
+
+    if (csIdx !== -1) {
+      // 고객 첫 메시지 (CS 요약 이전) + CS 한국어 요약 (이후 600자)
+      const customerPart = full.slice(0, Math.min(csIdx, 800)).trim();
+      const csPart       = full.slice(csIdx + CS_NAME.length, csIdx + CS_NAME.length + 600).trim();
+      const combined = [customerPart, csPart ? `[CS요약]\n${csPart}` : ''].filter(Boolean).join('\n\n---\n\n');
+      return combined.slice(0, 2500);
+    }
+
+    // CS 요약 없으면 첫 2000자만 사용
+    return full.slice(0, 2000);
+  }
+
   // ── MCF: 티켓 본문에서 고객 주소 파싱 (MCF Autofill parseClipboard와 동일 로직) ─
   const _MCF_PHONE_CC = {
     PT:'+351',ES:'+34',DE:'+49',FR:'+33',IT:'+39',NL:'+31',SE:'+46',FI:'+358',
@@ -1129,7 +1151,7 @@
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
       const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getTicketBodyText_();
+      const aiReview   = getAiInputText_();
       if (aiReview) fetchAiReason_(aiReview, aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
