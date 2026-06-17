@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.9.5
+// @version      2.9.6
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -981,6 +981,21 @@
   }
 
   // ── AI 인입사유 ───────────────────────────────────────────────────────────
+  function showAiReasonBtn_(category) {
+    const container = document.getElementById('sp-ai-reason-result');
+    if (!container) return;
+    container.innerHTML = `
+      <div style="padding:0 14px 0;">
+        <div style="border-top:1px solid #e9ebec;padding:7px 0 6px;">
+          <button id="sp-ai-reason-btn" style="background:rgba(124,58,237,0.88);color:#fff;border:none;border-radius:8px;padding:5px 0;cursor:pointer;font-size:12px;width:100%;backdrop-filter:blur(4px);">✦ AI 인입사유 분석</button>
+        </div>
+      </div>`;
+    container.querySelector('#sp-ai-reason-btn').addEventListener('click', () => {
+      const review = getAiInputText_();
+      fetchAiReason_(review, category);
+    });
+  }
+
   function fetchAiReason_(review, category) {
     const container = document.getElementById('sp-ai-reason-result');
     if (!container || !review) return;
@@ -1168,8 +1183,7 @@
       maybeShowAutoFill(document.getElementById(PANEL_ID));
 
       const aiCategory = lastProductData?.['대분류'] || '';
-      const aiReview   = getAiInputText_();
-      if (aiReview) fetchAiReason_(aiReview, aiCategory);
+      showAiReasonBtn_(aiCategory);
 
       container.innerHTML = `<div style="padding:0 14px 8px;">${results.map(({ asin, product, source, sourceUrl, error, marketplaces }) => {
         if (!product) {
@@ -2457,8 +2471,7 @@
       if (result) result.innerHTML = '<div id="sp-status">Scanning ticket for order IDs…</div>';
       const productResult = document.getElementById('sp-product-result');
       if (productResult) productResult.innerHTML = '';
-      const aiReasonEl = document.getElementById('sp-ai-reason-result');
-      if (aiReasonEl) aiReasonEl.innerHTML = '';
+      showAiReasonBtn_('');
       lastAiReason = null;
       const chips = document.getElementById('sp-detected-ids');
       if (chips) chips.innerHTML = '';
