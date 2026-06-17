@@ -542,7 +542,7 @@ function loadDefectDataDR_(category) {
   const list         = rawList.map(drNorm_);
   const enrichedList = filtered.map(r => {
     const label = String(r[1]).trim();
-    const desc  = String(r[2] || '').trim();
+    const desc  = String(r[2] || '').trim().slice(0, 80);
     return desc ? `${label}: ${desc}` : label;
   });
   return { rawList, list, enrichedList };
@@ -554,16 +554,19 @@ function callGeminiDR_(text, enrichedList, model) {
     if (!apiKey) { Logger.log('callGeminiDR: GEMINI_API_KEY not set'); return ''; }
     const prompt =
       `You are classifying a customer service ticket into ONE predefined category.\n\nThe input may contain:\n- The customer's original message (English, Spanish, French, German, or other languages)\n- A Korean summary written by the support team (after "[CS요약]")\n\nUse ALL available context to determine the most accurate category.\n\nCategories:\n${enrichedList.join('\n')}\n\nRules:\n- Return ONLY the exact label text from the list above\n- No explanation, punctuation, quotes, or markdown\n\nInput:\n${text}`;
-    const res = UrlFetchApp.fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-        payload: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 20 },
-        }),
-      }
-    );
+    const fetchOpts = {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 150 },
+      }),
+    };
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    let res = UrlFetchApp.fetch(url, fetchOpts);
+    if (res.getResponseCode() === 503) {
+      Utilities.sleep(2500);
+      res = UrlFetchApp.fetch(url, fetchOpts);
+    }
     if (res.getResponseCode() !== 200) {
       Logger.log(`callGeminiDR [${model}] HTTP ${res.getResponseCode()}: ${res.getContentText().slice(0, 200)}`);
       return '';
