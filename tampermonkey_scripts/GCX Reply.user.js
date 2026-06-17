@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
-// @version      2.8.6
+// @version      2.8.7
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -961,10 +961,21 @@
           lastAiReason = data.reason || null;
           renderAiReason_(lastAiReason);
           logStep_(`AI 인입사유: ${lastAiReason || '(결과 없음)'}`);
-        } catch { container.innerHTML = ''; }
+        } catch (err) {
+          container.innerHTML = '';
+          logStep_(`AI 인입사유 오류: JSON파싱실패 — ${res.responseText.slice(0, 120)}`);
+        }
       },
-      onerror()   { if (_panelSession === _session) container.innerHTML = ''; },
-      ontimeout() { if (_panelSession === _session) container.innerHTML = ''; },
+      onerror(res) {
+        if (_panelSession !== _session) return;
+        container.innerHTML = '';
+        logStep_(`AI 인입사유 오류: network error (status=${res.status})`);
+      },
+      ontimeout() {
+        if (_panelSession !== _session) return;
+        container.innerHTML = '';
+        logStep_('AI 인입사유 오류: timeout (35s 초과)');
+      },
     });
   }
 

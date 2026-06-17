@@ -17,7 +17,7 @@ const DEFECT_SS_ID      = '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g';
 const DEFECT_SHEET_NAME = 'Defect';
 const DR_CACHE_VERSION  = 'DR_v22_';
 const DR_CACHE_TTL      = 21600;
-const GEMINI_MODELS_DR  = ['gemini-3.5-flash', 'gemini-2.5-flash-lite'];
+const GEMINI_MODELS_DR  = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 
 const REGIONS = [
   { endpoint: 'https://sellingpartnerapi-eu.amazon.com', region: 'eu-west-1', cred: 'main' },
