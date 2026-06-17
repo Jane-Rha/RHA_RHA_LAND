@@ -359,6 +359,10 @@ function _mondayFetch_(apiKey, query, variables){
 }
 
 /** ====== UTILS ====== **/
+function clearRunLock(){
+  PropertiesService.getScriptProperties().deleteProperty(RUN_LOCK_KEY);
+  Logger.log('Run lock cleared.');
+}
 function _getMondayApiKey_(){
   var p = PropertiesService.getScriptProperties().getProperty('MONDAY_API_KEY');
   if (p && p.trim()) return p.trim();
