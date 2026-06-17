@@ -15,7 +15,7 @@ const MARKET_SHEETS = ['DE', 'NL', 'SE', 'ES', 'UK', 'FR', 'IT', 'JP', 'IN', 'SG
 // ── AI 인입사유 (DR) ───────────────────────────────────────────────────────────
 const DEFECT_SS_ID      = '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g';
 const DEFECT_SHEET_NAME = 'Defect';
-const DR_CACHE_VERSION  = 'DR_v22_';
+const DR_CACHE_VERSION  = 'DR_v23_';
 const DR_CACHE_TTL      = 21600;
 const GEMINI_MODELS_DR  = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 
