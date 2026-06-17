@@ -13,9 +13,9 @@ const MARKET_SS_ID  = '172fDVw4tu-hgbpV5FShWj4_SAMxeB54-v5BUlVgJUoA';
 const MARKET_SHEETS = ['DE', 'NL', 'SE', 'ES', 'UK', 'FR', 'IT', 'JP', 'IN', 'SG'];
 
 // ── AI 인입사유 (DR) ───────────────────────────────────────────────────────────
-const DEFECT_SS_ID      = '1fpv9TEDPGR8D6QRRc0ll-WzF7sOkfxe9UNBCmdBSE9g';
-const DEFECT_SHEET_NAME = 'Defect';
-const DR_CACHE_VERSION  = 'DR_v23_';
+const DEFECT_SS_ID      = '1jC2k5Cssj4nYI6R1gMlqtpyVTeDUIc-hTirdY3Ij8mk';
+const DEFECT_SHEET_NAME = 'GCX 인입사유';
+const DR_CACHE_VERSION  = 'DR_v24_';
 const DR_CACHE_TTL      = 21600;
 const GEMINI_MODELS_DR  = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 
