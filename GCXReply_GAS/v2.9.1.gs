@@ -2,7 +2,7 @@
 // @name         GCX Reply
 // @namespace    https://spigen.com/gcx
 
-// @version      2.9.0
+// @version      2.9.1
 // @description  Amazon order data via GAS web app + Spigen product info + Zendesk auto-fill
 // @author       Spigen GCX
 // @updateURL    https://raw.githubusercontent.com/codingintheusa0402/spigen-gcx-automation/main/tampermonkey_scripts/GCX%20Reply.user.js
@@ -58,7 +58,7 @@
   };
 
   const FULFILLMENT_MAP = { AFN: 'fba', MFN: 'merchant__fbm_' };
-  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.0';
+  const SCRIPT_VER = (typeof GM_info !== 'undefined' ? GM_info?.script?.version : null) || '2.9.1';
 
   // ── Module state ─────────────────────────────────────────────────────────
   let lastOrderData    = null;
@@ -1326,12 +1326,18 @@
     } catch (_) {}
   }
   safeAddStyle_(`
-    /* ── Liquid-glass keyframe ──────────────────────────────────────────── */
-    @keyframes sp-rainbow {
-      to { filter: hue-rotate(360deg); }
+    /* ── Liquid-glass keyframes ─────────────────────────────────────────── */
+    /* Slow light-angle drift — mimics sunlight moving across real glass     */
+    @keyframes sp-glass-shimmer {
+      0%   { filter: hue-rotate(0deg)   brightness(1.00); }
+      30%  { filter: hue-rotate(12deg)  brightness(1.04); }
+      60%  { filter: hue-rotate(-8deg)  brightness(0.98); }
+      100% { filter: hue-rotate(0deg)   brightness(1.00); }
     }
 
-    /* ── Main panel — frosted glass ─────────────────────────────────────── */
+    /* ── Main panel — Apple Liquid Glass ────────────────────────────────── */
+    /* Apple spec: "combines optical properties of glass with a sense of     */
+    /* fluidity" — content infuses through; the glass is nearly invisible.   */
     #sp-order-panel {
       position: fixed;
       right: 16px;
@@ -1343,39 +1349,44 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      /* frosted glass */
-      background: rgba(246, 247, 255, 0.52);
-      backdrop-filter: blur(28px) saturate(180%);
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      /* Very transparent so Zendesk content bleeds through */
+      background: rgba(255, 255, 255, 0.28);
+      backdrop-filter: blur(40px) saturate(200%) brightness(108%);
+      -webkit-backdrop-filter: blur(40px) saturate(200%) brightness(108%);
       border: none;
-      border-radius: 20px;
+      border-radius: 22px;
       box-shadow:
-        0 12px 48px rgba(0,0,0,0.18),
-        0 2px 8px rgba(0,0,0,0.10),
-        inset 0 1px 0 rgba(255,255,255,0.88),
-        inset 0 -1px 0 rgba(255,255,255,0.28);
+        0 20px 60px rgba(0,0,0,0.13),
+        0 2px 6px rgba(0,0,0,0.07),
+        /* Top specular — the defining glass highlight */
+        inset 0 2px 0 rgba(255,255,255,0.95),
+        /* Inner glow depth */
+        inset 0 1px 28px rgba(255,255,255,0.18),
+        /* Bottom inner shadow for thickness illusion */
+        inset 0 -1px 0 rgba(255,255,255,0.22);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       font-size: 12.5px;
-      color: #1a1a2e;
+      color: #1c1c1e;
       z-index: 99999;
     }
 
-    /* Rainbow iridescent border — mask trick: conic-gradient visible only in the 1.5px padding ring */
+    /* Glass edge — real glass iridescence: pastel, low-saturation, slow     */
+    /* Like a soap bubble or glass lens edge catching light at an angle       */
     #sp-order-panel::before {
       content: '';
       position: absolute;
       inset: 0;
-      border-radius: 20px;
-      padding: 1.5px;
+      border-radius: 22px;
+      padding: 1px;
       background: conic-gradient(
-        from 180deg,
-        rgba(255, 60, 120, 0.85),
-        rgba(255, 140, 0,  0.85),
-        rgba(250, 230, 0,  0.85),
-        rgba(0,  220, 110, 0.85),
-        rgba(0,  160, 255, 0.85),
-        rgba(170, 0,  255, 0.85),
-        rgba(255, 60, 120, 0.85)
+        from 0deg,
+        rgba(255, 255, 255, 0.90),   /* white specular — light hitting edge  */
+        rgba(200, 220, 255, 0.55),   /* pale blue — glass tint               */
+        rgba(255, 210, 250, 0.45),   /* pale pink — thin-film interference   */
+        rgba(200, 255, 230, 0.40),   /* pale mint                            */
+        rgba(255, 245, 200, 0.50),   /* pale gold                            */
+        rgba(225, 200, 255, 0.50),   /* pale lavender                        */
+        rgba(255, 255, 255, 0.90)    /* white specular again                 */
       );
       -webkit-mask:
         linear-gradient(#fff 0 0) content-box,
@@ -1384,7 +1395,23 @@
       mask-composite: exclude;
       pointer-events: none;
       z-index: 10000;
-      animation: sp-rainbow 6s linear infinite;
+      animation: sp-glass-shimmer 15s ease-in-out infinite;
+    }
+
+    /* Inner glass-face gradient — gives the glass a slight convex sheen     */
+    #sp-order-panel::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 22px;
+      background: linear-gradient(
+        175deg,
+        rgba(255,255,255,0.22) 0%,
+        rgba(255,255,255,0.04) 55%,
+        rgba(0,0,0,0.03) 100%
+      );
+      pointer-events: none;
+      z-index: 1;
     }
 
     #sp-order-panel * { box-sizing: border-box; }
@@ -1392,9 +1419,9 @@
     /* ── Header ─────────────────────────────────────────────────────────── */
     #sp-panel-header {
       padding: 9px 12px;
-      background: rgba(238, 240, 255, 0.55);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.45);
-      border-radius: 20px 20px 0 0;
+      background: rgba(255, 255, 255, 0.30);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.50);
+      border-radius: 22px 22px 0 0;
       display: flex;
       align-items: center;
       gap: 7px;
@@ -1425,7 +1452,7 @@
 
     #sp-order-panel.minimized #sp-panel-body,
     #sp-order-panel.minimized #sp-resize-handle { display: none; }
-    #sp-order-panel.minimized #sp-panel-header { border-radius: 20px; border-bottom: none; cursor: pointer; }
+    #sp-order-panel.minimized #sp-panel-header { border-radius: 22px; border-bottom: none; cursor: pointer; }
 
     /* ── Resize handle ──────────────────────────────────────────────────── */
     #sp-resize-handle {
@@ -1539,23 +1566,23 @@
     /* ── Order ID chips ─────────────────────────────────────────────────── */
     #sp-detected-ids { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; }
     .sp-chip {
-      background: rgba(232,244,252,0.72);
-      border: 1px solid rgba(91,164,207,0.6);
-      color: #1a6490;
+      background: rgba(91,164,207,0.12);
+      border: 1px solid rgba(91,164,207,0.30);
+      color: #2a6496;
       border-radius: 12px;
       padding: 2px 10px;
       font-size: 11.5px;
       cursor: pointer;
       font-family: monospace;
       user-select: none;
-      backdrop-filter: blur(4px);
+      backdrop-filter: blur(8px);
     }
-    .sp-chip:hover { background: rgba(200,228,245,0.85); }
+    .sp-chip:hover { background: rgba(91,164,207,0.22); }
 
     #sp-status {
       text-align: center;
       padding: 14px 8px;
-      color: #6670a0;
+      color: #6e6e73;
       font-size: 12px;
     }
 
@@ -1568,12 +1595,12 @@
       padding: 7px 0 4px;
       font-weight: 600;
       font-size: 12.5px;
-      color: #2a304a;
+      color: #1c1c1e;
       cursor: pointer;
       user-select: none;
-      border-top: 1px solid rgba(210,215,235,0.6);
+      border-top: 1px solid rgba(0,0,0,0.08);
     }
-    .sp-block-title .sp-chevron { margin-left: auto; transition: transform .18s; color: rgba(160,165,190,0.9); }
+    .sp-block-title .sp-chevron { margin-left: auto; transition: transform .18s; color: rgba(110,110,115,0.8); }
     .sp-block.collapsed .sp-block-title .sp-chevron { transform: rotate(-90deg); }
     .sp-block.collapsed .sp-block-body { display: none; }
 
@@ -1585,35 +1612,37 @@
       gap: 6px;
     }
     .sp-row:nth-child(odd) {
-      background: rgba(240,242,255,0.48);
+      background: rgba(0,0,0,0.03);
       margin: 0 -14px;
       padding: 4px 14px;
       border-radius: 6px;
     }
-    .sp-label { color: #4a8fcf; min-width: 128px; flex-shrink: 0; font-size: 12px; }
-    .sp-val   { color: #22263a; font-weight: 500; word-break: break-all; font-size: 12px; }
-    .sp-val.link { color: #5ba4cf; text-decoration: underline; cursor: pointer; }
+    .sp-label { color: #3a6ea8; min-width: 128px; flex-shrink: 0; font-size: 12px; }
+    .sp-val   { color: #1c1c1e; font-weight: 500; word-break: break-all; font-size: 12px; }
+    .sp-val.link { color: #3a6ea8; text-decoration: underline; cursor: pointer; }
 
     .sp-items-title {
       font-weight: 600;
       font-size: 11.5px;
-      color: #5c627a;
+      color: #6e6e73;
       padding: 6px 0 2px;
-      border-top: 1px solid rgba(210,215,235,0.5);
+      border-top: 1px solid rgba(0,0,0,0.07);
       margin-top: 2px;
     }
 
     /* ── Step log ───────────────────────────────────────────────────────── */
     #sp-load-log {
       font-size: 10px;
-      color: #8890aa;
+      color: #6e6e73;
       padding: 3px 14px 4px;
-      border-top: 1px dashed rgba(200,205,230,0.5);
+      border-top: 1px solid rgba(0,0,0,0.07);
       max-height: 56px;
       overflow-y: auto;
       font-family: monospace;
       line-height: 1.6;
       flex-shrink: 0;
+      position: relative;
+      z-index: 2;
     }
     #sp-load-log:empty { display: none; }
 
@@ -1678,12 +1707,12 @@
     }
     #sp-notes-content {
       font-size: 12px;
-      color: #22263a;
+      color: #1c1c1e;
       white-space: pre-wrap;
       padding: 6px 8px;
-      background: rgba(240,242,255,0.55);
-      border: 1px solid rgba(200,205,230,0.5);
-      border-radius: 4px;
+      background: rgba(255,255,255,0.40);
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 8px;
       min-height: 36px;
     }
   `);
